@@ -310,11 +310,21 @@ function render() {
       for (const room of cell.rooms) drawRoomDetails(room, detailLevel);
     }
 
+    // The hidden macro graph is rendered as an architectural fabric: short
+    // halls repeatedly open into waystations, connector rooms, and annexes.
+    for (const corridor of corridors) {
+      for (const chamber of corridor.chambers) {
+        drawRoomDetails(chamber, detailLevel);
+      }
+    }
+
     // Notches and interior voids are subtracted last so they erase both the
     // outer wall and any interior detail that would otherwise cross the void.
-    // Exterior-facing cutouts produce L/U-like room silhouettes.
     for (const cell of cells) {
       for (const room of cell.rooms) drawRoomCutouts(room);
+    }
+    for (const corridor of corridors) {
+      for (const chamber of corridor.chambers) drawRoomCutouts(chamber);
     }
 
     // Internal room doors are generated from the growth adjacency graph.
@@ -322,8 +332,13 @@ function render() {
       for (const door of cell.doors) drawDoor(door);
     }
 
-    // External doors are the only places where the routed connector enters a
-    // room complex, so corridor walls never arbitrarily slice through rooms.
+    // Openings inside the connection fabric join side annexes and waystations.
+    for (const corridor of corridors) {
+      for (const door of corridor.fabricDoors || []) drawDoor(door);
+    }
+
+    // External doors are the only places where the routed connection enters a
+    // local room complex.
     for (const corridor of corridors) {
       for (const door of corridor.doors) drawDoor(door);
     }

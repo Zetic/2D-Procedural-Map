@@ -1,8 +1,10 @@
 import {
   GENERATOR_VERSION,
   InfiniteMapGenerator,
+  isSiteCell,
   parentCell,
   roomsOverlap,
+  sitePosition,
 } from '../src/generator.js';
 
 function assert(condition, message) {
@@ -25,6 +27,12 @@ function snapshot(cells) {
   return JSON.stringify(cells.map((cell) => ({
     cx: cell.cx,
     cy: cell.cy,
+    siteId: cell.siteId,
+    parent: cell.parent,
+    anchor: [
+      Number(cell.anchor.x.toFixed(4)),
+      Number(cell.anchor.y.toFixed(4)),
+    ],
     rooms: cell.rooms.map((room) => [
       room.id,
       Number(room.x.toFixed(4)),
@@ -32,12 +40,14 @@ function snapshot(cells) {
       Number(room.w.toFixed(4)),
       Number(room.h.toFixed(4)),
       Number(room.angle.toFixed(6)),
+      room.kind,
     ]),
     doors: cell.doors.map((door) => [
       Number(door.x.toFixed(3)),
       Number(door.y.toFixed(3)),
       Number(door.angle.toFixed(5)),
       Number(door.width.toFixed(3)),
+      door.kind,
     ]),
     corridors: cell.corridors.map((corridor) => [
       corridor.edgeKey,
@@ -64,49 +74,100 @@ function snapshot(cells) {
   })));
 }
 
-function verifyParentChains(seed) {
-  for (let cy = -18; cy <= 18; cy += 3) {
-    for (let cx = -18; cx <= 18; cx += 3) {
-      let x = cx;
-      let y = cy;
-      let guard = 0;
+function rootDistanceSq(seed, cx, cy) {
+  const root = sitePosition(seed, 0, 0);
+  const point = sitePosition(seed, cx, cy);
+  const dx = point.x - root.x;
+  const dy = point.y - root.y;
+  return dx * dx + dy * dy;
+}
 
-      while (x !== 0 || y !== 0) {
-        const parent = parentCell(seed, x, y);
-        assert(parent, `Missing parent for ${seed} at ${x},${y}`);
+function verifyParentChain(seed, cx, cy) {
+  let x = cx;
+  let y = cy;
+  let guard = 0;
 
-        const before = Math.abs(x) + Math.abs(y);
-        const after = Math.abs(parent[0]) + Math.abs(parent[1]);
-        assert(
-          after < before,
-          `Parent chain did not approach origin for ${seed} at ${x},${y}`,
-        );
+  while (x !== 0 || y !== 0) {
+    assert(isSiteCell(seed, x, y), `Expected accepted site at ${x},${y}`);
 
-        [x, y] = parent;
-        guard += 1;
-        assert(guard < 1000, `Parent chain guard exceeded for ${seed}`);
-      }
-    }
+    const parent = parentCell(seed, x, y);
+    assert(parent, `Missing parent for site ${x},${y}`);
+
+    const before = rootDistanceSq(seed, x, y);
+    const after = rootDistanceSq(seed, parent[0], parent[1]);
+
+    assert(
+      after < before,
+      `Parent did not decrease root distance for ${x},${y}`,
+    );
+
+    [x, y] = parent;
+    guard += 1;
+    assert(guard < 500, `Parent chain guard exceeded for ${cx},${cy}`);
   }
 }
 
-function verifyRegion(generator, bounds) {
+function verifyBlueNoiseSites(seed, cells) {
+  const sites = cells.map((cell) => ({
+    cx: cell.cx,
+    cy: cell.cy,
+    x: cell.anchor.x,
+    y: cell.anchor.y,
+  }));
+
+  for (let i = 0; i < sites.length; i++) {
+    for (let j = i + 1; j < sites.length; j++) {
+      const dx = sites[i].x - sites[j].x;
+      const dy = sites[i].y - sites[j].y;
+      const distance = Math.hypot(dx, dy);
+
+      assert(
+        distance >= 499.9,
+        `Blue-noise sites too close: ${sites[i].cx},${sites[i].cy} and ${sites[j].cx},${sites[j].cy} at ${distance.toFixed(2)}`,
+      );
+    }
+  }
+
+  const bucketCounts = new Map();
+  const bucketSize = 900;
+
+  for (const site of sites) {
+    const bx = Math.floor(site.x / bucketSize);
+    const by = Math.floor(site.y / bucketSize);
+    const key = `${bx},${by}`;
+    bucketCounts.set(key, (bucketCounts.get(key) || 0) + 1);
+  }
+
+  const counts = [...bucketCounts.values()];
+  const uniqueCounts = new Set(counts);
+
+  assert(
+    uniqueCounts.size >= 2,
+    'Expected irregular site counts per query-sized bucket',
+  );
+}
+
+function verifyRegion(seed, generator, bounds) {
   const cells = generator.query(bounds);
   const rooms = [];
   const corridorMap = new Map();
 
   for (const cell of cells) {
+    verifyParentChain(seed, cell.cx, cell.cy);
     rooms.push(...cell.rooms);
+
     for (const corridor of cell.corridors) {
       corridorMap.set(corridor.edgeKey, corridor);
     }
   }
 
+  verifyBlueNoiseSites(seed, cells);
+
   for (let i = 0; i < rooms.length; i++) {
     for (let j = i + 1; j < rooms.length; j++) {
       assert(
         !roomsOverlap(rooms[i], rooms[j], -0.1),
-        `Room interior overlap: ${rooms[i].id} and ${rooms[j].id}`,
+        `Local room interior overlap: ${rooms[i].id} and ${rooms[j].id}`,
       );
     }
   }
@@ -122,14 +183,13 @@ function verifyRegion(generator, bounds) {
     for (let i = 0; i < corridor.points.length - 1; i++) {
       const a = corridor.points[i];
       const b = corridor.points[i + 1];
+
       maxSegmentLength = Math.max(
         maxSegmentLength,
         Math.hypot(b.x - a.x, b.y - a.y),
       );
     }
 
-    // First and last segments intentionally cross their selected room wall.
-    // Every middle segment must remain clear of room interiors.
     for (let i = 1; i < corridor.points.length - 2; i++) {
       const segment = segmentRect(
         corridor.points[i],
@@ -140,7 +200,7 @@ function verifyRegion(generator, bounds) {
       for (const room of rooms) {
         assert(
           !roomsOverlap(segment, room, -0.1),
-          `Corridor ${corridor.edgeKey} crosses room ${room.id}`,
+          `Growth spine ${corridor.edgeKey} crosses local room ${room.id}`,
         );
       }
     }
@@ -149,7 +209,7 @@ function verifyRegion(generator, bounds) {
       for (const room of rooms) {
         assert(
           !roomsOverlap(chamber, room, -0.1),
-          `Route chamber for ${corridor.edgeKey} overlaps room ${room.id}`,
+          `Growth-fabric room for ${corridor.edgeKey} overlaps local room ${room.id}`,
         );
       }
     }
@@ -164,121 +224,125 @@ function verifyRegion(generator, bounds) {
       kinds.add(room.kind);
       if ((room.cutouts || []).length) cutouts += 1;
     }
+
     for (const door of cell.doors) {
       if (door.kind === 'opening') wideOpenings += 1;
     }
   }
 
   return {
+    sites: cells.length,
     rooms: rooms.length,
-    cells: cells.length,
     corridors: corridorMap.size,
-    chambers: [...corridorMap.values()].reduce(
-      (total, corridor) => total + corridor.chambers.length,
-      0,
-    ),
-    kinds,
-    cutouts,
-    wideOpenings,
     fabricRooms,
     fabricDoors,
     maxSegmentLength,
+    cutouts,
+    wideOpenings,
+    kinds,
   };
 }
 
+assert(GENERATOR_VERSION === 6, 'Expected generator version 6');
+
 const seeds = ['backrooms-71', 'alpha', 'reference'];
 const regions = [
-  { minX: -1800, maxX: 1800, minY: -1350, maxY: 1350 },
-  { minX: 3600, maxX: 6300, minY: -2700, maxY: 0 },
+  { minX: -2200, maxX: 2200, minY: -1650, maxY: 1650 },
+  { minX: 3200, maxX: 6200, minY: -3000, maxY: 0 },
 ];
 
-assert(GENERATOR_VERSION === 5, 'Expected generator version 5');
-
-let totals = {
+const totals = {
+  sites: 0,
   rooms: 0,
-  cells: 0,
   corridors: 0,
-  chambers: 0,
-  cutouts: 0,
-  wideOpenings: 0,
   fabricRooms: 0,
   fabricDoors: 0,
+  cutouts: 0,
+  wideOpenings: 0,
   maxSegmentLength: 0,
 };
 const observedKinds = new Set();
 
 for (const seed of seeds) {
-  verifyParentChains(seed);
-
   const generator = new InfiniteMapGenerator(seed);
 
   for (const region of regions) {
-    const result = verifyRegion(generator, region);
+    const result = verifyRegion(seed, generator, region);
+
+    totals.sites += result.sites;
     totals.rooms += result.rooms;
-    totals.cells += result.cells;
     totals.corridors += result.corridors;
-    totals.chambers += result.chambers;
-    totals.cutouts += result.cutouts;
-    totals.wideOpenings += result.wideOpenings;
     totals.fabricRooms += result.fabricRooms;
     totals.fabricDoors += result.fabricDoors;
+    totals.cutouts += result.cutouts;
+    totals.wideOpenings += result.wideOpenings;
     totals.maxSegmentLength = Math.max(
       totals.maxSegmentLength,
       result.maxSegmentLength,
     );
+
     for (const kind of result.kinds) observedKinds.add(kind);
   }
 
-  const home = { minX: -900, maxX: 900, minY: -900, maxY: 900 };
+  const home = { minX: -1000, maxX: 1000, minY: -800, maxY: 800 };
   const before = snapshot(generator.query(home));
 
   generator.query({
-    minX: 10800,
-    maxX: 12600,
-    minY: -9000,
-    maxY: -7200,
+    minX: 12000,
+    maxX: 14000,
+    minY: -10000,
+    maxY: -8000,
   });
 
   const after = snapshot(generator.query(home));
-  assert(before === after, `Exploration-order determinism failed for ${seed}`);
+
+  assert(
+    before === after,
+    `Exploration-order determinism failed for ${seed}`,
+  );
 }
 
-const averageRoomsPerCell = totals.rooms / totals.cells;
-
-assert(
-  averageRoomsPerCell >= 12,
-  `Expected dense generation, got only ${averageRoomsPerCell.toFixed(2)} rooms/cell`,
-);
-assert(
-  observedKinds.size >= 10,
-  `Expected room-style variety, observed only ${observedKinds.size} kinds`,
-);
-assert(totals.cutouts > 0, 'Expected notched/courtyard room shapes');
-assert(totals.wideOpenings > 0, 'Expected wide compound-room openings');
-
+const averageRoomsPerSite = totals.rooms / Math.max(1, totals.sites);
 const averageFabricRoomsPerCorridor =
   totals.fabricRooms / Math.max(1, totals.corridors);
 
 assert(
-  averageFabricRoomsPerCorridor >= 2,
-  `Expected architectural fabric along connections, got only ${averageFabricRoomsPerCorridor.toFixed(2)} rooms/corridor`,
+  averageRoomsPerSite >= 7,
+  `Expected dense local growth, got only ${averageRoomsPerSite.toFixed(2)} rooms/site`,
+);
+assert(
+  averageFabricRoomsPerCorridor >= 3,
+  `Expected dense connection fabric, got only ${averageFabricRoomsPerCorridor.toFixed(2)} rooms/connection`,
 );
 assert(
   totals.maxSegmentLength <= 115,
-  `Uninterrupted connector segment too long: ${totals.maxSegmentLength.toFixed(2)}`,
+  `Uninterrupted growth segment too long: ${totals.maxSegmentLength.toFixed(2)}`,
 );
+assert(
+  observedKinds.size >= 10,
+  `Expected architectural variety, observed only ${observedKinds.size} kinds`,
+);
+assert(totals.cutouts > 0, 'Expected notched/courtyard room shapes');
+assert(totals.wideOpenings > 0, 'Expected wide compound-room openings');
 
 console.log(
   JSON.stringify({
     generatorVersion: GENERATOR_VERSION,
     seeds: seeds.length,
     regions: seeds.length * regions.length,
-    roomKinds: [...observedKinds].sort(),
-    averageRoomsPerCell: Number(averageRoomsPerCell.toFixed(2)),
+    sites: totals.sites,
+    rooms: totals.rooms,
+    corridors: totals.corridors,
+    fabricRooms: totals.fabricRooms,
+    fabricDoors: totals.fabricDoors,
+    averageRoomsPerSite: Number(averageRoomsPerSite.toFixed(2)),
     averageFabricRoomsPerCorridor: Number(
       averageFabricRoomsPerCorridor.toFixed(2),
     ),
-    ...totals,
+    maxSegmentLength: Number(totals.maxSegmentLength.toFixed(2)),
+    roomKinds: [...observedKinds].sort(),
+    cutouts: totals.cutouts,
+    wideOpenings: totals.wideOpenings,
     status: 'ok',
   }),
 );

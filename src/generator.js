@@ -1520,7 +1520,7 @@ export class InfiniteMapGenerator {
     return complex;
   }
 
-  getObstacleComplexes(ax, ay, bx, by, corridorWidth) {
+  getObstacleRooms(ax, ay, bx, by, corridorWidth, skipRoomIds = new Set()) {
     const minX = Math.min(ax, bx) - 2;
     const maxX = Math.max(ax, bx) + 2;
     const minY = Math.min(ay, by) - 2;
@@ -1530,11 +1530,22 @@ export class InfiniteMapGenerator {
     for (let cy = minY; cy <= maxY; cy++) {
       for (let cx = minX; cx <= maxX; cx++) {
         const complex = this.getComplex(cx, cy);
-        obstacles.push({
-          x: complex.anchor.x,
-          y: complex.anchor.y,
-          r: complex.radius + corridorWidth * 0.5 + 14,
-        });
+
+        // Routing now sees actual room-scale occupied space rather than one
+        // oversized circle around the entire district. This allows growth to
+        // thread through architectural gaps instead of drawing highways around
+        // isolated blobs.
+        for (const room of complex.rooms) {
+          if (skipRoomIds.has(room.id)) continue;
+          obstacles.push({
+            x: room.x,
+            y: room.y,
+            r:
+              Math.hypot(room.w, room.h) * 0.5 +
+              corridorWidth * 0.5 +
+              7,
+          });
+        }
       }
     }
 
@@ -1552,39 +1563,96 @@ export class InfiniteMapGenerator {
     const source = this.getComplex(ax, ay);
     const target = this.getComplex(bx, by);
     const routeSeed = edgeSalt(edgeKey, this.seed ^ 0x5a17c3);
-    const width = 20 + (routeSeed % 15);
-    const sourceExit = chooseClearPortal(source, target.anchor, routeSeed ^ 0x1122, width);
-    const targetExit = chooseClearPortal(target, source.anchor, routeSeed ^ 0x3344, width);
+
+    // Hall links are intentionally narrow. The connection gains visual mass
+    // from rooms, junctions, and annexes placed every short distance.
+    const width = 16 + (routeSeed % 11);
+
+    const sourceExit = chooseClearPortal(
+      source,
+      target.anchor,
+      routeSeed ^ 0x1122,
+      width,
+    );
+    const targetExit = chooseClearPortal(
+      target,
+      source.anchor,
+      routeSeed ^ 0x3344,
+      width,
+    );
+
     const sourcePortal = sourceExit.portal;
     const targetPortal = targetExit.portal;
     const sourceOutside = sourceExit.outside;
     const targetOutside = targetExit.outside;
-    const obstacles = this.getObstacleComplexes(ax, ay, bx, by, width);
 
-    const routed = routeAStar(sourceOutside, targetOutside, obstacles, routeSeed) ||
+    const sourceRoom = source.rooms[sourcePortal.roomIndex];
+    const targetRoom = target.rooms[targetPortal.roomIndex];
+    const skipRoomIds = new Set([
+      sourceRoom && sourceRoom.id,
+      targetRoom && targetRoom.id,
+    ].filter(Boolean));
+
+    const obstacles = this.getObstacleRooms(
+      ax,
+      ay,
+      bx,
+      by,
+      width,
+      skipRoomIds,
+    );
+
+    const routed =
+      routeAStar(sourceOutside, targetOutside, obstacles, routeSeed) ||
       fallbackRoute(sourceOutside, targetOutside, obstacles, routeSeed);
 
-    const middle = simplifyPath(routed);
-    const points = [sourcePortal, sourceOutside];
+    const rawMiddle = routed || [sourceOutside, targetOutside];
+    const rawRoute = [sourceOutside];
 
-    for (const point of middle) {
+    for (const point of rawMiddle) {
+      const last = rawRoute[rawRoute.length - 1];
+      if (Math.hypot(point.x - last.x, point.y - last.y) > 1) {
+        rawRoute.push(point);
+      }
+    }
+
+    const lastRoute = rawRoute[rawRoute.length - 1];
+    if (Math.hypot(targetOutside.x - lastRoute.x, targetOutside.y - lastRoute.y) > 1) {
+      rawRoute.push(targetOutside);
+    }
+
+    const simplified = simplifyPath(rawRoute);
+    const color =
+      hash01(routeSeed, 1, 2, 3) < 0.56
+        ? source.color
+        : target.color;
+
+    const fabric = buildConnectionFabric(
+      simplified,
+      width,
+      color,
+      routeSeed,
+      obstacles,
+    );
+
+    const points = [sourcePortal];
+    for (const point of fabric.spine) {
       const last = points[points.length - 1];
       if (Math.hypot(point.x - last.x, point.y - last.y) > 1) points.push(point);
     }
 
-    const lastMiddle = points[points.length - 1];
-    if (Math.hypot(targetOutside.x - lastMiddle.x, targetOutside.y - lastMiddle.y) > 1) {
-      points.push(targetOutside);
+    const last = points[points.length - 1];
+    if (Math.hypot(targetPortal.x - last.x, targetPortal.y - last.y) > 1) {
+      points.push(targetPortal);
     }
-    points.push(targetPortal);
 
-    const color = hash01(routeSeed, 1, 2, 3) < 0.5 ? source.color : target.color;
     const corridor = {
       edgeKey,
       points,
       width,
       color,
-      chambers: buildChambers(points.slice(1, -1), width, color, routeSeed, obstacles),
+      chambers: fabric.chambers,
+      fabricDoors: fabric.fabricDoors,
       doors: [corridorDoor(sourcePortal), corridorDoor(targetPortal)],
     };
 

@@ -2082,6 +2082,10 @@ function buildLocalClusters(
 
           if (
             candidate &&
+            !roomsOverlap(
+              candidate,
+              parent,
+            ) &&
             roomCircleClear(
               candidate,
               occupied,
@@ -2402,6 +2406,14 @@ function connectionBetween(
     );
 
     if (
+      !roomsOverlap(
+        room,
+        roomA,
+      ) &&
+      !roomsOverlap(
+        room,
+        roomB,
+      ) &&
       roomCircleClear(
         room,
         allForCollision,

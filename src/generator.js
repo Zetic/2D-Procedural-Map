@@ -850,8 +850,6 @@ function edgeFabric(
             familySeed,
             annexColor,
             annexX,
-              Math.cos(annexAngle) *
-                distance,
             annexY,
             point.angle,
             aw,

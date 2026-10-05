@@ -1640,6 +1640,77 @@ function chamberClear(chamber, obstacles, corridorWidth) {
   return true;
 }
 
+function organicizeRoute(points, obstacles, routeSeed) {
+  if (points.length < 2) return points.slice();
+
+  const output = [{ ...points[0] }];
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+
+    if (len < 150) {
+      output.push({ ...b });
+      continue;
+    }
+
+    const ux = dx / len;
+    const uy = dy / len;
+    const nx = -uy;
+    const ny = ux;
+    const bends = Math.max(1, Math.min(3, Math.floor(len / 230)));
+    const candidate = [{ ...a }];
+
+    let previousOffset = 0;
+
+    for (let bend = 1; bend <= bends; bend++) {
+      const t = bend / (bends + 1);
+      const envelope = Math.sin(Math.PI * t);
+      const rawOffset =
+        hashSigned(
+          routeSeed,
+          i * 31 + bend,
+          points.length,
+          1901,
+        ) *
+        Math.min(82, len * 0.13) *
+        envelope;
+
+      const offset = previousOffset * 0.28 + rawOffset * 0.72;
+      previousOffset = offset;
+
+      const tangentJitter =
+        hashSigned(
+          routeSeed,
+          i * 37 + bend,
+          points.length,
+          1902,
+        ) *
+        Math.min(34, len * 0.045);
+
+      candidate.push({
+        x: a.x + dx * t + nx * offset + ux * tangentJitter,
+        y: a.y + dy * t + ny * offset + uy * tangentJitter,
+      });
+    }
+
+    candidate.push({ ...b });
+
+    if (pathClear(candidate, obstacles)) {
+      for (let p = 1; p < candidate.length; p++) {
+        output.push(candidate[p]);
+      }
+    } else {
+      output.push({ ...b });
+    }
+  }
+
+  return simplifyPath(output);
+}
+
 function resamplePath(points, maxStep, routeSeed) {
   if (!points.length) return [];
   const output = [{ ...points[0] }];
@@ -2013,13 +2084,18 @@ export class InfiniteMapGenerator {
     const sourcePortal = chosen.sourceExit.portal;
     const targetPortal = chosen.targetExit.portal;
     const simplified = simplifyPath(chosen.routed);
+    const organicRoute = organicizeRoute(
+      simplified,
+      obstacles,
+      chosen.attemptSeed,
+    );
     const color =
       hash01(routeSeed, 1, 2, 3) < 0.56
         ? source.color
         : target.color;
 
     const fabric = buildConnectionFabric(
-      simplified,
+      organicRoute,
       width,
       color,
       chosen.attemptSeed,

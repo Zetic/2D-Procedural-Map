@@ -4504,7 +4504,7 @@ export class InfiniteMapGenerator {
     );
   }
 
-  getChunk(cx, cy) {
+  getChunk(cx, cy, providedPrimitives = null) {
     const key = chunkKey(cx, cy);
 
     const cached =
@@ -4530,8 +4530,23 @@ export class InfiniteMapGenerator {
         originY + FABRIC_CHUNK,
     };
 
+    const primitiveBounds = {
+      minX: bounds.minX - FABRIC_CELL,
+      maxX: bounds.maxX + FABRIC_CELL,
+      minY: bounds.minY - FABRIC_CELL,
+      maxY: bounds.maxY + FABRIC_CELL,
+    };
+
     const primitives =
-      this.collectPrimitives(bounds);
+      providedPrimitives
+        ? providedPrimitives.filter(
+            (primitive) =>
+              aabbIntersects(
+                primitive.aabb,
+                primitiveBounds,
+              ),
+          )
+        : this.collectPrimitives(bounds);
 
     const innerN = RASTER_N;
     const stride = innerN + 2;
@@ -4787,7 +4802,8 @@ export class InfiniteMapGenerator {
         FABRIC_CHUNK,
     );
 
-    const chunks = [];
+    const coordinates = [];
+    const missing = [];
 
     for (
       let cy = minCY;
@@ -4799,11 +4815,89 @@ export class InfiniteMapGenerator {
         cx <= maxCX;
         cx++
       ) {
-        chunks.push(
-          this.getChunk(cx, cy),
+        coordinates.push([cx, cy]);
+
+        const key =
+          chunkKey(cx, cy);
+
+        if (
+          !this.chunkCache.has(key)
+        ) {
+          missing.push([cx, cy]);
+        }
+      }
+    }
+
+    // Generate one shared frontier/infill primitive set for all newly visible
+    // chunks. This avoids re-running merge/infill discovery once per chunk and
+    // makes low-zoom exploration substantially faster.
+    if (missing.length) {
+      let minMissingX = Infinity;
+      let maxMissingX = -Infinity;
+      let minMissingY = Infinity;
+      let maxMissingY = -Infinity;
+
+      for (
+        const [cx, cy] of missing
+      ) {
+        minMissingX =
+          Math.min(
+            minMissingX,
+            cx * FABRIC_CHUNK,
+          );
+
+        maxMissingX =
+          Math.max(
+            maxMissingX,
+            (cx + 1) *
+              FABRIC_CHUNK,
+          );
+
+        minMissingY =
+          Math.min(
+            minMissingY,
+            cy * FABRIC_CHUNK,
+          );
+
+        maxMissingY =
+          Math.max(
+            maxMissingY,
+            (cy + 1) *
+              FABRIC_CHUNK,
+          );
+      }
+
+      const sharedPrimitives =
+        this.collectPrimitives({
+          minX: minMissingX,
+          maxX: maxMissingX,
+          minY: minMissingY,
+          maxY: maxMissingY,
+        });
+
+      for (
+        const [cx, cy] of missing
+      ) {
+        this.getChunk(
+          cx,
+          cy,
+          sharedPrimitives,
         );
       }
     }
+
+    const chunks =
+      coordinates.map(
+        ([cx, cy]) => {
+          const entry =
+            this.chunkCache.get(
+              chunkKey(cx, cy),
+            );
+
+          entry.used = this.frame;
+          return entry.geometry;
+        },
+      );
 
     if (
       this.chunkCache.size > 360

@@ -23,6 +23,7 @@ let pointer = null;
 
 const background = '#4b4945';
 const wall = '#625747';
+const interiorWall = '#75664f';
 const interiorLine = 'rgba(88, 72, 53, 0.64)';
 const columnFill = 'rgba(86, 70, 52, 0.60)';
 
@@ -32,6 +33,7 @@ function clamp(value, min, max) {
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
+
   cssWidth = Math.max(1, rect.width);
   cssHeight = Math.max(1, rect.height);
   dpr = clamp(window.devicePixelRatio || 1, 1, 2);
@@ -55,26 +57,58 @@ function worldBounds() {
 }
 
 function drawFloors(chunks) {
+  // A tiny screen-space bleed removes subpixel seams between raster rows.
+  const bleed = 0.65 / Math.max(camera.zoom, 0.08);
+
   for (const chunk of chunks) {
     for (const rect of chunk.floors) {
       ctx.fillStyle = rect.color;
-      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.fillRect(
+        rect.x - bleed * 0.5,
+        rect.y - bleed * 0.5,
+        rect.w + bleed,
+        rect.h + bleed,
+      );
     }
   }
 }
 
-function drawWalls(chunks) {
+function drawExteriorWalls(chunks) {
   ctx.beginPath();
 
   for (const chunk of chunks) {
-    for (const segment of chunk.walls) {
-      ctx.moveTo(segment.x1, segment.y1);
-      ctx.lineTo(segment.x2, segment.y2);
+    for (const path of chunk.exteriorPaths) {
+      if (!path || path.length < 2) continue;
+
+      ctx.moveTo(path[0].x, path[0].y);
+
+      for (let i = 1; i < path.length; i++) {
+        ctx.lineTo(path[i].x, path[i].y);
+      }
     }
   }
 
   ctx.strokeStyle = wall;
   ctx.lineWidth = 3.5;
+  ctx.lineCap = 'square';
+  ctx.lineJoin = 'miter';
+  ctx.stroke();
+}
+
+function drawInteriorWalls(chunks, detailLevel) {
+  if (detailLevel < 1) return;
+
+  ctx.beginPath();
+
+  for (const chunk of chunks) {
+    for (const segment of chunk.interiorWalls) {
+      ctx.moveTo(segment.x1, segment.y1);
+      ctx.lineTo(segment.x2, segment.y2);
+    }
+  }
+
+  ctx.strokeStyle = interiorWall;
+  ctx.lineWidth = detailLevel >= 2 ? 1.85 : 1.35;
   ctx.lineCap = 'butt';
   ctx.lineJoin = 'miter';
   ctx.stroke();
@@ -84,7 +118,7 @@ function drawDetails(chunks, detailLevel) {
   if (detailLevel < 2) return;
 
   ctx.strokeStyle = interiorLine;
-  ctx.lineWidth = 1.8;
+  ctx.lineWidth = 1.55;
   ctx.lineCap = 'butt';
 
   for (const chunk of chunks) {
@@ -109,7 +143,13 @@ function drawDetails(chunks, detailLevel) {
       if (detail.type !== 'column') continue;
 
       ctx.beginPath();
-      ctx.arc(detail.x, detail.y, detail.r, 0, Math.PI * 2);
+      ctx.arc(
+        detail.x,
+        detail.y,
+        detail.r,
+        0,
+        Math.PI * 2,
+      );
       ctx.fill();
     }
   }
@@ -130,18 +170,20 @@ function render() {
   const chunks = generator.query(worldBounds());
 
   const detailLevel =
-    camera.zoom < 0.24 ? 0 :
-    camera.zoom < 0.44 ? 1 :
+    camera.zoom < 0.20 ? 0 :
+    camera.zoom < 0.38 ? 1 :
     camera.zoom < 0.76 ? 2 : 3;
 
-  // There is deliberately no connector render pass. The generator returns
-  // only one architectural fabric: floor, exterior boundary, and details.
+  // One architectural fabric: compound floor union, exterior contour,
+  // meaningful interior space boundaries, then sparse room details.
   drawFloors(chunks);
-  drawWalls(chunks);
+  drawExteriorWalls(chunks);
+  drawInteriorWalls(chunks, detailLevel);
   drawDetails(chunks, detailLevel);
 
   coordsLabel.textContent =
     Math.round(camera.x) + ', ' + Math.round(camera.y);
+
   zoomLabel.textContent =
     Math.round(camera.zoom * 100) + '%';
 }
@@ -154,49 +196,86 @@ function requestRender() {
 
 function screenToWorld(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
+
   const sx = clientX - rect.left;
   const sy = clientY - rect.top;
 
   return {
-    x: camera.x + (sx - cssWidth / 2) / camera.zoom,
-    y: camera.y + (sy - cssHeight / 2) / camera.zoom,
+    x:
+      camera.x +
+      (sx - cssWidth / 2) / camera.zoom,
+    y:
+      camera.y +
+      (sy - cssHeight / 2) / camera.zoom,
   };
 }
 
-canvas.addEventListener('pointerdown', (event) => {
-  canvas.setPointerCapture(event.pointerId);
+canvas.addEventListener(
+  'pointerdown',
+  (event) => {
+    canvas.setPointerCapture(event.pointerId);
 
-  pointer = {
-    id: event.pointerId,
-    x: event.clientX,
-    y: event.clientY,
-    cameraX: camera.x,
-    cameraY: camera.y,
-  };
+    pointer = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      cameraX: camera.x,
+      cameraY: camera.y,
+    };
 
-  canvas.classList.add('dragging');
-});
+    canvas.classList.add('dragging');
+  },
+);
 
-canvas.addEventListener('pointermove', (event) => {
-  if (!pointer || pointer.id !== event.pointerId) return;
+canvas.addEventListener(
+  'pointermove',
+  (event) => {
+    if (
+      !pointer ||
+      pointer.id !== event.pointerId
+    ) {
+      return;
+    }
 
-  const dx = event.clientX - pointer.x;
-  const dy = event.clientY - pointer.y;
+    const dx =
+      event.clientX - pointer.x;
 
-  camera.x = pointer.cameraX - dx / camera.zoom;
-  camera.y = pointer.cameraY - dy / camera.zoom;
+    const dy =
+      event.clientY - pointer.y;
 
-  requestRender();
-});
+    camera.x =
+      pointer.cameraX -
+      dx / camera.zoom;
+
+    camera.y =
+      pointer.cameraY -
+      dy / camera.zoom;
+
+    requestRender();
+  },
+);
 
 function finishPointer(event) {
-  if (!pointer || pointer.id !== event.pointerId) return;
+  if (
+    !pointer ||
+    pointer.id !== event.pointerId
+  ) {
+    return;
+  }
+
   pointer = null;
   canvas.classList.remove('dragging');
 }
 
-canvas.addEventListener('pointerup', finishPointer);
-canvas.addEventListener('pointercancel', finishPointer);
+canvas.addEventListener(
+  'pointerup',
+  finishPointer,
+);
+
+canvas.addEventListener(
+  'pointercancel',
+  finishPointer,
+);
 
 canvas.addEventListener(
   'wheel',
@@ -208,10 +287,12 @@ canvas.addEventListener(
       event.clientY,
     );
 
-    const factor = Math.exp(-event.deltaY * 0.0012);
+    const factor =
+      Math.exp(-event.deltaY * 0.0012);
+
     camera.zoom = clamp(
       camera.zoom * factor,
-      0.12,
+      0.10,
       3.2,
     );
 
@@ -220,8 +301,11 @@ canvas.addEventListener(
       event.clientY,
     );
 
-    camera.x += before.x - after.x;
-    camera.y += before.y - after.y;
+    camera.x +=
+      before.x - after.x;
+
+    camera.y +=
+      before.y - after.y;
 
     requestRender();
   },
@@ -230,32 +314,51 @@ canvas.addEventListener(
 
 function applySeed() {
   const value =
-    seedInput.value.trim() || 'backrooms-71';
+    seedInput.value.trim() ||
+    'backrooms-71';
 
   seedInput.value = value;
   generator.setSeed(value);
 
   const url = new URL(location.href);
   url.searchParams.set('seed', value);
-  history.replaceState(null, '', url);
+
+  history.replaceState(
+    null,
+    '',
+    url,
+  );
 
   requestRender();
 }
 
-applySeedButton.addEventListener('click', applySeed);
+applySeedButton.addEventListener(
+  'click',
+  applySeed,
+);
 
-seedInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') applySeed();
-});
+seedInput.addEventListener(
+  'keydown',
+  (event) => {
+    if (event.key === 'Enter') {
+      applySeed();
+    }
+  },
+);
 
-homeButton.addEventListener('click', () => {
-  camera.x = 450;
-  camera.y = 450;
-  camera.zoom = 0.72;
-  requestRender();
-});
+homeButton.addEventListener(
+  'click',
+  () => {
+    camera.x = 450;
+    camera.y = 450;
+    camera.zoom = 0.72;
+    requestRender();
+  },
+);
 
-const resizeObserver = new ResizeObserver(resizeCanvas);
+const resizeObserver =
+  new ResizeObserver(resizeCanvas);
+
 resizeObserver.observe(canvas);
 
 resizeCanvas();

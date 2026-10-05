@@ -1815,85 +1815,83 @@ export class InfiniteMapGenerator {
     // Hall links are intentionally narrow. The connection gains visual mass
     // from rooms, junctions, and annexes placed every short distance.
     const width = 16 + (routeSeed % 11);
+    const obstacles = this.getObstacleRooms(ax, ay, bx, by, width);
 
-    const sourceExit = chooseClearPortal(
+    const sourceOptions = clearPortalOptions(
       source,
       target.anchor,
       routeSeed ^ 0x1122,
       width,
+      6,
     );
-    const targetExit = chooseClearPortal(
+    const targetOptions = clearPortalOptions(
       target,
       source.anchor,
       routeSeed ^ 0x3344,
       width,
+      6,
     );
 
-    const sourcePortal = sourceExit.portal;
-    const targetPortal = targetExit.portal;
-    const sourceOutside = sourceExit.outside;
-    const targetOutside = targetExit.outside;
-
-    const obstacles = this.getObstacleRooms(
-      ax,
-      ay,
-      bx,
-      by,
-      width,
-    );
-
-    const gridRoute = routeAStar(
-      sourceOutside,
-      targetOutside,
-      obstacles,
-      routeSeed,
-    );
-
-    let routed = null;
-
-    if (gridRoute) {
-      const candidate = [sourceOutside];
-      for (const point of gridRoute) {
-        const last = candidate[candidate.length - 1];
-        if (Math.hypot(point.x - last.x, point.y - last.y) > 1) {
-          candidate.push(point);
-        }
+    const combinations = [];
+    for (let sourceIndex = 0; sourceIndex < sourceOptions.length; sourceIndex++) {
+      for (let targetIndex = 0; targetIndex < targetOptions.length; targetIndex++) {
+        combinations.push({
+          sourceIndex,
+          targetIndex,
+          rank:
+            sourceIndex +
+            targetIndex +
+            hash01(
+              routeSeed,
+              sourceIndex,
+              targetIndex,
+              1821,
+            ) * 0.15,
+        });
       }
-
-      const last = candidate[candidate.length - 1];
-      if (Math.hypot(targetOutside.x - last.x, targetOutside.y - last.y) > 1) {
-        candidate.push(targetOutside);
-      }
-
-      if (pathClear(candidate, obstacles)) routed = candidate;
     }
 
-    if (!routed) {
-      routed = fallbackRoute(
-        sourceOutside,
-        targetOutside,
+    combinations.sort((left, right) => left.rank - right.rank);
+
+    let chosen = null;
+
+    for (const combination of combinations) {
+      const sourceExit = sourceOptions[combination.sourceIndex];
+      const targetExit = targetOptions[combination.targetIndex];
+      const attemptSeed =
+        routeSeed ^
+        hashInt(
+          routeSeed,
+          combination.sourceIndex,
+          combination.targetIndex,
+          1822,
+        );
+
+      const routed = findSafeRoute(
+        sourceExit.outside,
+        targetExit.outside,
         obstacles,
-        routeSeed,
+        attemptSeed,
       );
+
+      if (!routed) continue;
+
+      chosen = {
+        sourceExit,
+        targetExit,
+        routed,
+        attemptSeed,
+      };
+      break;
     }
 
-    if (!routed) {
-      routed = detourAroundObstacles(
-        sourceOutside,
-        targetOutside,
-        obstacles,
-        routeSeed,
-      );
-    }
-
-    // The detour solver operates directly against the room obstacle field and
-    // is the final deterministic connectivity fallback. In normal operation it
-    // resolves every remaining path after A* / dogleg routing.
-    if (!routed) {
+    if (!chosen) {
       throw new Error('Unable to route architectural growth for ' + edgeKey);
     }
 
-    const simplified = simplifyPath(routed);
+    const sourcePortal = chosen.sourceExit.portal;
+    const targetPortal = chosen.targetExit.portal;
+    const simplified = simplifyPath(chosen.routed);
     const color =
       hash01(routeSeed, 1, 2, 3) < 0.56
         ? source.color
@@ -1903,14 +1901,16 @@ export class InfiniteMapGenerator {
       simplified,
       width,
       color,
-      routeSeed,
+      chosen.attemptSeed,
       obstacles,
     );
 
     const points = [sourcePortal];
     for (const point of fabric.spine) {
       const last = points[points.length - 1];
-      if (Math.hypot(point.x - last.x, point.y - last.y) > 1) points.push(point);
+      if (Math.hypot(point.x - last.x, point.y - last.y) > 1) {
+        points.push(point);
+      }
     }
 
     const last = points[points.length - 1];

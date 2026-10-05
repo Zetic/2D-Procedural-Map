@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#4b4945" />
+  <title>Infinite Procedural Map</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <canvas id="map" aria-label="Infinite deterministic procedural map. Drag to pan and use the mouse wheel or trackpad to zoom."></canvas>
+
+    <section class="controls" aria-label="Map controls">
+      <label class="seed-control">
+        <span>Seed</span>
+        <input id="seed" type="text" value="backrooms-71" autocomplete="off" spellcheck="false" />
+      </label>
+      <button id="apply-seed" type="button">Apply</button>
+      <button id="home" type="button">Home</button>
+    </section>
+
+    <div class="status" aria-live="polite">
+      <span id="coords">0, 0</span>
+      <span aria-hidden="true">·</span>
+      <span id="zoom">100%</span>
+    </div>
+
+    <div class="help">Drag to explore · Wheel / trackpad to zoom</div>
+  </main>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>

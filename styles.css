@@ -1,0 +1,109 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #4b4945;
+  color: #f6ead0;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #4b4945; }
+body { overscroll-behavior: none; }
+button, input { font: inherit; }
+
+.app-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  background: #4b4945;
+}
+
+#map {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+  background: #4b4945;
+}
+
+#map.dragging { cursor: grabbing; }
+
+.controls {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  padding: 8px;
+  border: 1px solid rgba(255, 244, 219, 0.18);
+  border-radius: 10px;
+  background: rgba(40, 39, 36, 0.86);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 24px rgba(0,0,0,.18);
+}
+
+.seed-control {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: rgba(255, 244, 219, .68);
+}
+
+.seed-control input {
+  width: min(34vw, 220px);
+  min-width: 120px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 244, 219, 0.2);
+  border-radius: 7px;
+  outline: none;
+  background: rgba(255,255,255,.06);
+  color: #fff3d8;
+}
+
+.seed-control input:focus {
+  border-color: rgba(255, 244, 219, .62);
+}
+
+button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 244, 219, 0.2);
+  border-radius: 7px;
+  background: rgba(255,255,255,.07);
+  color: #fff3d8;
+  cursor: pointer;
+}
+
+button:hover { background: rgba(255,255,255,.12); }
+button:focus-visible { outline: 2px solid #f6dfad; outline-offset: 2px; }
+
+.status,
+.help {
+  position: absolute;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  color: rgba(255, 244, 219, .72);
+  font-size: 12px;
+  letter-spacing: .025em;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0,0,0,.55);
+}
+
+.status {
+  left: max(14px, env(safe-area-inset-left));
+  display: flex;
+  gap: 7px;
+}
+
+.help { right: max(14px, env(safe-area-inset-right)); }
+
+@media (max-width: 620px) {
+  .controls { right: 12px; flex-wrap: wrap; }
+  .seed-control { flex: 1 1 100%; }
+  .seed-control input { width: 100%; }
+  .help { display: none; }
+}

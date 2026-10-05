@@ -2209,6 +2209,493 @@ function buildLocalClusters(
   };
 }
 
+function makeInfillRoom(
+  seed,
+  gx,
+  gy,
+  x,
+  y,
+  availableRadius,
+  nearestRoom,
+) {
+  const rng = seededRng(
+    hashInt(
+      seed,
+      gx,
+      gy,
+      5601,
+    ),
+  );
+
+  const kindRoll = rng();
+
+  const kind =
+    kindRoll < 0.22
+      ? 'infill-cell'
+      : kindRoll < 0.46
+        ? 'infill-office'
+        : kindRoll < 0.72
+          ? 'infill-room'
+          : kindRoll < 0.90
+            ? 'infill-suite'
+            : 'infill-gallery';
+
+  let w =
+    kind === 'infill-gallery'
+      ? 62 + rng() * 58
+      : 38 + rng() * 54;
+
+  let h =
+    kind === 'infill-gallery'
+      ? 30 + rng() * 28
+      : 34 + rng() * 48;
+
+  let radius =
+    Math.hypot(w, h) * 0.5;
+
+  const maxRadius =
+    Math.min(
+      52,
+      availableRadius * 0.90,
+    );
+
+  if (radius > maxRadius) {
+    const scale =
+      maxRadius / radius;
+
+    w *= scale;
+    h *= scale;
+    radius = maxRadius;
+  }
+
+  if (
+    w < 30 ||
+    h < 28 ||
+    radius < 20
+  ) {
+    return null;
+  }
+
+  const fieldAngle =
+    valueNoise(
+      seed,
+      x,
+      y,
+      1100,
+      5611,
+    ) *
+    TAU;
+
+  const angle =
+    Math.round(
+      (
+        fieldAngle +
+        hashSigned(
+          seed,
+          gx,
+          gy,
+          5612,
+        ) *
+          0.48
+      ) /
+        (Math.PI / 12),
+    ) *
+    (Math.PI / 12);
+
+  const shapeRoll = rng();
+
+  const shape =
+    shapeRoll < 0.11
+      ? 'l'
+      : shapeRoll < 0.22
+        ? 'step'
+        : shapeRoll < 0.29
+          ? 'chamfer'
+          : 'rect';
+
+  const variant =
+    hashInt(
+      seed,
+      gx,
+      gy,
+      5613,
+    ) % 16;
+
+  const vertices =
+    transformVertices(
+      localShapeVertices(
+        shape,
+        w,
+        h,
+        variant,
+      ),
+      x,
+      y,
+      angle,
+    );
+
+  const colorIndex =
+    hash01(
+      seed,
+      gx,
+      gy,
+      5614,
+    ) < 0.88
+      ? nearestRoom.colorIndex
+      : clamp(
+          nearestRoom.colorIndex +
+            (
+              hash01(
+                seed,
+                gx,
+                gy,
+                5615,
+              ) < 0.5
+                ? -1
+                : 1
+            ),
+          0,
+          4,
+        );
+
+  return {
+    id:
+      'infill:' +
+      gx +
+      ',' +
+      gy,
+    source: 'infill',
+    priority:
+      hashInt(
+        seed,
+        gx,
+        gy,
+        5616,
+      ),
+    x,
+    y,
+    w,
+    h,
+    radius,
+    angle,
+    kind,
+    major: false,
+    shape,
+    variant,
+    vertices,
+    aabb:
+      polygonAabb(vertices),
+    color:
+      FLOOR_PALETTES[
+        colorIndex
+      ],
+    colorIndex,
+    wallColor:
+      WALL_COLOR,
+    doors: [],
+    details: [],
+  };
+}
+
+function buildInfillRooms(
+  seed,
+  occupiedRooms,
+  bounds,
+) {
+  const grid = 138;
+  const searchRadius = 205;
+
+  const minGX =
+    Math.floor(
+      (bounds.minX - 120) /
+      grid,
+    );
+
+  const maxGX =
+    Math.floor(
+      (bounds.maxX + 120) /
+      grid,
+    );
+
+  const minGY =
+    Math.floor(
+      (bounds.minY - 120) /
+      grid,
+    );
+
+  const maxGY =
+    Math.floor(
+      (bounds.maxY + 120) /
+      grid,
+    );
+
+  const candidates = [];
+
+  for (
+    let gy = minGY;
+    gy <= maxGY;
+    gy++
+  ) {
+    for (
+      let gx = minGX;
+      gx <= maxGX;
+      gx++
+    ) {
+      const x =
+        gx * grid +
+        grid * 0.5 +
+        hashSigned(
+          seed,
+          gx,
+          gy,
+          5621,
+        ) *
+          grid *
+          0.27;
+
+      const y =
+        gy * grid +
+        grid * 0.5 +
+        hashSigned(
+          seed,
+          gx,
+          gy,
+          5622,
+        ) *
+          grid *
+          0.27;
+
+      let nearest = null;
+      let nearestClearance =
+        Infinity;
+
+      const sectors =
+        [false, false, false, false];
+
+      const nearRooms = [];
+
+      for (
+        const room of
+        occupiedRooms
+      ) {
+        const dx =
+          room.x - x;
+
+        const dy =
+          room.y - y;
+
+        const distance =
+          Math.hypot(dx, dy);
+
+        const clearance =
+          distance -
+          room.radius;
+
+        if (
+          clearance <
+          nearestClearance
+        ) {
+          nearestClearance =
+            clearance;
+          nearest = room;
+        }
+
+        if (
+          distance <=
+          searchRadius +
+            room.radius * 0.25
+        ) {
+          nearRooms.push({
+            room,
+            distance,
+            clearance,
+          });
+
+          const angle =
+            Math.atan2(dy, dx);
+
+          let sector =
+            Math.floor(
+              (
+                angle +
+                Math.PI
+              ) /
+              (Math.PI / 2),
+            );
+
+          sector =
+            ((sector % 4) + 4) %
+            4;
+
+          sectors[sector] = true;
+        }
+      }
+
+      if (
+        !nearest ||
+        nearestClearance < 24 ||
+        nearRooms.length < 3
+      ) {
+        continue;
+      }
+
+      const sectorCount =
+        sectors.filter(Boolean)
+          .length;
+
+      if (sectorCount < 3) {
+        continue;
+      }
+
+      const profile =
+        worldProfile(
+          seed,
+          x,
+          y,
+        );
+
+      const roll =
+        hash01(
+          seed,
+          gx,
+          gy,
+          5623,
+        );
+
+      const threshold =
+        0.11 +
+        profile.density * 0.19 +
+        (
+          sectorCount === 4
+            ? 0.07
+            : 0
+        );
+
+      if (roll > threshold) {
+        continue;
+      }
+
+      const room =
+        makeInfillRoom(
+          seed,
+          gx,
+          gy,
+          x,
+          y,
+          nearestClearance - 5,
+          nearest,
+        );
+
+      if (!room) continue;
+
+      candidates.push({
+        room,
+        nearest,
+        nearRooms:
+          nearRooms
+            .slice()
+            .sort(
+              (a, b) =>
+                a.clearance -
+                b.clearance,
+            ),
+      });
+    }
+  }
+
+  candidates.sort(
+    (a, b) => {
+      if (
+        a.room.priority !==
+        b.room.priority
+      ) {
+        return (
+          a.room.priority -
+          b.room.priority
+        );
+      }
+
+      return a.room.id.localeCompare(
+        b.room.id,
+      );
+    },
+  );
+
+  const accepted = [];
+  const links = [];
+  const occupied = [
+    ...occupiedRooms,
+  ];
+
+  for (const candidate of candidates) {
+    const room =
+      candidate.room;
+
+    if (
+      !roomCircleClear(
+        room,
+        occupied,
+      )
+    ) {
+      continue;
+    }
+
+    accepted.push(room);
+    occupied.push(room);
+
+    links.push({
+      fromRoomId:
+        candidate.nearest.id,
+      toRoomId:
+        room.id,
+      key:
+        'infill-link:' +
+        room.id,
+    });
+
+    const second =
+      candidate.nearRooms.find(
+        (entry) =>
+          entry.room.id !==
+            candidate.nearest.id &&
+          entry.clearance < 78 &&
+          Math.hypot(
+            entry.room.x -
+              candidate.nearest.x,
+            entry.room.y -
+              candidate.nearest.y,
+          ) > 55,
+      );
+
+    if (
+      second &&
+      hash01(
+        seed,
+        hashString(room.id),
+        0,
+        5631,
+      ) < 0.32
+    ) {
+      links.push({
+        fromRoomId:
+          second.room.id,
+        toRoomId:
+          room.id,
+        key:
+          'infill-loop:' +
+          room.id +
+          ':' +
+          second.room.id,
+      });
+    }
+  }
+
+  return {
+    rooms: accepted,
+    links,
+  };
+}
+
 function closestClusterPair(
   clusterA,
   clusterB,
@@ -2909,6 +3396,22 @@ export class InfiniteMapGenerator {
     const localLinks =
       localClusters.links;
 
+    const infill =
+      buildInfillRooms(
+        this.seed,
+        [
+          ...siteRooms,
+          ...clusterRooms,
+        ],
+        support,
+      );
+
+    const infillRooms =
+      infill.rooms;
+
+    const infillLinks =
+      infill.links;
+
     const edgeMap = new Map();
 
     for (const room of siteRooms) {
@@ -2982,6 +3485,7 @@ export class InfiniteMapGenerator {
       const room of [
         ...siteRooms,
         ...clusterRooms,
+        ...infillRooms,
       ]
     ) {
       allRooms.set(
@@ -2995,14 +3499,17 @@ export class InfiniteMapGenerator {
     const collisionRooms = [
       ...siteRooms,
       ...clusterRooms,
+      ...infillRooms,
     ];
 
     // Local portal growth creates multi-room architectural masses before any
     // inter-site obligation is connected. Each accepted child is separated
     // from every other room and attached through an explicit short passage.
     for (
-      const link of
-      localLinks
+      const link of [
+        ...localLinks,
+        ...infillLinks,
+      ]
     ) {
       const source =
         allRooms.get(

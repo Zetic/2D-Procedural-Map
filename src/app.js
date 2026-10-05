@@ -21,9 +21,9 @@ let renderQueued = false;
 let pointer = null;
 
 const background = '#4b4945';
-const wall = '#625747';
-const interiorLine = 'rgba(102, 84, 61, 0.62)';
-const detailDot = 'rgba(87, 71, 52, 0.55)';
+const wall = '#5f5445';
+const interiorLine = 'rgba(88, 72, 53, 0.66)';
+const columnFill = 'rgba(86, 70, 52, 0.58)';
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -61,45 +61,45 @@ function tracePath(path) {
 function drawPath(path, width, color) {
   if (!tracePath(path)) return;
   ctx.lineJoin = 'miter';
-  ctx.lineCap = 'square';
+  ctx.lineCap = 'butt';
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.stroke();
 }
 
-function withRoomTransform(room, callback) {
+function withRectTransform(rect, callback) {
   ctx.save();
-  ctx.translate(room.x, room.y);
-  ctx.rotate(room.angle);
+  ctx.translate(rect.x, rect.y);
+  ctx.rotate(rect.angle);
   callback();
   ctx.restore();
 }
 
-function drawRoomWall(room) {
-  withRoomTransform(room, () => {
-    ctx.strokeStyle = wall;
-    ctx.lineWidth = 8;
-    ctx.beginPath();
-    ctx.rect(-room.w / 2, -room.h / 2, room.w, room.h);
-    ctx.stroke();
+function drawRectFloor(rect) {
+  withRectTransform(rect, () => {
+    ctx.fillStyle = rect.color;
+    ctx.fillRect(-rect.w / 2, -rect.h / 2, rect.w, rect.h);
   });
 }
 
-function drawRoomFloor(room) {
-  withRoomTransform(room, () => {
-    ctx.fillStyle = room.color;
-    ctx.fillRect(-room.w / 2, -room.h / 2, room.w, room.h);
+function drawRectWall(rect, width = 5) {
+  withRectTransform(rect, () => {
+    ctx.strokeStyle = wall;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.rect(-rect.w / 2, -rect.h / 2, rect.w, rect.h);
+    ctx.stroke();
   });
 }
 
 function drawRoomDetails(room, detailLevel) {
   if (detailLevel < 2) return;
 
-  withRoomTransform(room, () => {
+  withRectTransform(room, () => {
     ctx.strokeStyle = interiorLine;
     ctx.lineWidth = 2;
 
-    for (const partition of room.partitions) {
+    for (const partition of room.partitions || []) {
       ctx.beginPath();
       if (partition.axis === 'x') {
         const x = -room.w / 2 + room.w * partition.t;
@@ -119,21 +119,45 @@ function drawRoomDetails(room, detailLevel) {
       ctx.stroke();
     }
 
-    if (detailLevel >= 3 && room.major) {
-      const cols = Math.max(1, Math.floor(room.w / 70));
-      const rows = Math.max(1, Math.floor(room.h / 70));
-      ctx.fillStyle = detailDot;
-      for (let iy = 1; iy < rows + 1; iy++) {
-        for (let ix = 1; ix < cols + 1; ix++) {
-          const x = -room.w / 2 + (ix / (cols + 1)) * room.w;
-          const y = -room.h / 2 + (iy / (rows + 1)) * room.h;
-          ctx.beginPath();
-          ctx.arc(x, y, 3.2, 0, Math.PI * 2);
-          ctx.fill();
-        }
+    if (detailLevel >= 3) {
+      ctx.fillStyle = columnFill;
+      for (const column of room.columns || []) {
+        const x = -room.w / 2 + column.u * room.w;
+        const y = -room.h / 2 + column.v * room.h;
+        ctx.beginPath();
+        ctx.arc(x, y, column.r, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
   });
+}
+
+function drawDoor(door) {
+  const half = door.width * 0.5;
+  const dx = Math.cos(door.angle) * half;
+  const dy = Math.sin(door.angle) * half;
+  ctx.beginPath();
+  ctx.moveTo(door.x - dx, door.y - dy);
+  ctx.lineTo(door.x + dx, door.y + dy);
+  ctx.strokeStyle = door.color;
+  ctx.lineWidth = 11;
+  ctx.lineCap = 'butt';
+  ctx.stroke();
+}
+
+function collectCorridors(cells) {
+  const seen = new Set();
+  const corridors = [];
+
+  for (const cell of cells) {
+    for (const corridor of cell.corridors) {
+      if (seen.has(corridor.edgeKey)) continue;
+      seen.add(corridor.edgeKey);
+      corridors.push(corridor);
+    }
+  }
+
+  return corridors;
 }
 
 function render() {
@@ -148,39 +172,47 @@ function render() {
   ctx.translate(-camera.x, -camera.y);
 
   const cells = generator.query(worldBounds());
+  const corridors = collectCorridors(cells);
   const detailLevel = camera.zoom < 0.24 ? 0 : camera.zoom < 0.42 ? 1 : camera.zoom < 0.72 ? 2 : 3;
 
-  // All walls are rendered as underlays. The floor pass covers wall segments
-  // at actual intersections, turning collisions into openings and junctions.
-  for (const cell of cells) {
-    for (const corridor of cell.corridors) {
-      if (detailLevel === 0 && corridor.detail) continue;
-      drawPath(corridor.points, corridor.width + 8, wall);
+  // Architectural connectors are real floor geometry. Their wall shell is
+  // rendered first, then the floor pass cuts open crossings and turn chambers.
+  for (const corridor of corridors) {
+    drawPath(corridor.points, corridor.width + 9, wall);
+    for (const chamber of corridor.chambers) drawRectWall(chamber, 7);
+  }
+
+  // Dense room complexes use touching rectangles with explicit doorway cuts.
+  // No room is placed by drawing a route through its interior.
+  if (detailLevel > 0) {
+    for (const cell of cells) {
+      for (const room of cell.rooms) drawRectFloor(room);
     }
+  }
+
+  for (const corridor of corridors) {
+    for (const chamber of corridor.chambers) drawRectFloor(chamber);
+    drawPath(corridor.points, corridor.width, corridor.color);
   }
 
   if (detailLevel > 0) {
     for (const cell of cells) {
-      for (const room of cell.rooms) drawRoomWall(room);
-    }
-  }
-
-  // Corridors paint through wall underlays first so room boundaries get
-  // doorway-sized cuts wherever the connected floor reaches them.
-  for (const cell of cells) {
-    for (const corridor of cell.corridors) {
-      if (detailLevel === 0 && corridor.detail) continue;
-      drawPath(corridor.points, corridor.width, corridor.color);
-    }
-  }
-
-  if (detailLevel > 0) {
-    for (const cell of cells) {
-      for (const room of cell.rooms) drawRoomFloor(room);
+      for (const room of cell.rooms) drawRectWall(room, 5);
     }
 
     for (const cell of cells) {
       for (const room of cell.rooms) drawRoomDetails(room, detailLevel);
+    }
+
+    // Internal room doors are generated from the growth adjacency graph.
+    for (const cell of cells) {
+      for (const door of cell.doors) drawDoor(door);
+    }
+
+    // External doors are the only places where the routed connector enters a
+    // room complex, so corridor walls never arbitrarily slice through rooms.
+    for (const corridor of corridors) {
+      for (const door of corridor.doors) drawDoor(door);
     }
   }
 

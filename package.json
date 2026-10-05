@@ -1,0 +1,8 @@
+{
+  "name": "2d-procedural-map",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/generator-smoke.mjs"
+  }
+}

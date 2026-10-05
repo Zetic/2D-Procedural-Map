@@ -1121,40 +1121,101 @@ function gridKey(gx, gy) {
   return gx + ',' + gy;
 }
 
-function nearestClearGridPoint(point, obstacles) {
+function buildBlockedGrid(obstacles, minX, maxX, minY, maxY) {
+  const blocked = new Set();
+
+  for (const obstacle of obstacles) {
+    const minGX = Math.max(minX, Math.floor((obstacle.x - obstacle.r) / ROUTE_STEP));
+    const maxGX = Math.min(maxX, Math.ceil((obstacle.x + obstacle.r) / ROUTE_STEP));
+    const minGY = Math.max(minY, Math.floor((obstacle.y - obstacle.r) / ROUTE_STEP));
+    const maxGY = Math.min(maxY, Math.ceil((obstacle.y + obstacle.r) / ROUTE_STEP));
+    const r2 = obstacle.r * obstacle.r;
+
+    for (let gy = minGY; gy <= maxGY; gy++) {
+      const wy = gy * ROUTE_STEP;
+      for (let gx = minGX; gx <= maxGX; gx++) {
+        const wx = gx * ROUTE_STEP;
+        const dx = wx - obstacle.x;
+        const dy = wy - obstacle.y;
+        if (dx * dx + dy * dy < r2) blocked.add(gridKey(gx, gy));
+      }
+    }
+  }
+
+  return blocked;
+}
+
+function nearestClearGridPoint(point, blocked, obstacles, minX, maxX, minY, maxY) {
   const baseX = Math.round(point.x / ROUTE_STEP);
   const baseY = Math.round(point.y / ROUTE_STEP);
 
-  for (let radius = 0; radius <= 4; radius++) {
+  for (let radius = 0; radius <= 5; radius++) {
     for (let oy = -radius; oy <= radius; oy++) {
       for (let ox = -radius; ox <= radius; ox++) {
         if (radius > 0 && Math.abs(ox) !== radius && Math.abs(oy) !== radius) continue;
+        const gx = baseX + ox;
+        const gy = baseY + oy;
+        if (gx < minX || gx > maxX || gy < minY || gy > maxY) continue;
+        if (blocked.has(gridKey(gx, gy))) continue;
+
         const candidate = {
-          gx: baseX + ox,
-          gy: baseY + oy,
-          x: (baseX + ox) * ROUTE_STEP,
-          y: (baseY + oy) * ROUTE_STEP,
+          gx,
+          gy,
+          x: gx * ROUTE_STEP,
+          y: gy * ROUTE_STEP,
         };
+
+        // Only a handful of candidates are examined here, so retain the exact
+        // segment test for the short lead-in from the portal to the route grid.
         if (segmentClear(point, candidate, obstacles)) return candidate;
       }
     }
   }
 
-  return { gx: baseX, gy: baseY, x: baseX * ROUTE_STEP, y: baseY * ROUTE_STEP };
+  return {
+    gx: baseX,
+    gy: baseY,
+    x: baseX * ROUTE_STEP,
+    y: baseY * ROUTE_STEP,
+  };
 }
 
 function routeAStar(start, goal, obstacles, routeSeed) {
-  const startGrid = nearestClearGridPoint(start, obstacles);
-  const goalGrid = nearestClearGridPoint(goal, obstacles);
+  const rawSX = Math.round(start.x / ROUTE_STEP);
+  const rawSY = Math.round(start.y / ROUTE_STEP);
+  const rawGX = Math.round(goal.x / ROUTE_STEP);
+  const rawGY = Math.round(goal.y / ROUTE_STEP);
+  const margin = 20;
+
+  const minX = Math.min(rawSX, rawGX) - margin;
+  const maxX = Math.max(rawSX, rawGX) + margin;
+  const minY = Math.min(rawSY, rawGY) - margin;
+  const maxY = Math.max(rawSY, rawGY) + margin;
+  const blocked = buildBlockedGrid(obstacles, minX, maxX, minY, maxY);
+
+  const startGrid = nearestClearGridPoint(
+    start,
+    blocked,
+    obstacles,
+    minX,
+    maxX,
+    minY,
+    maxY,
+  );
+  const goalGrid = nearestClearGridPoint(
+    goal,
+    blocked,
+    obstacles,
+    minX,
+    maxX,
+    minY,
+    maxY,
+  );
+
   const sx = startGrid.gx;
   const sy = startGrid.gy;
   const gx = goalGrid.gx;
   const gy = goalGrid.gy;
-  const margin = 20;
-  const minX = Math.min(sx, gx) - margin;
-  const maxX = Math.max(sx, gx) + margin;
-  const minY = Math.min(sy, gy) - margin;
-  const maxY = Math.max(sy, gy) + margin;
 
   const open = new MinHeap();
   const startKey = gridKey(sx, sy);
@@ -1172,11 +1233,18 @@ function routeAStar(start, goal, obstacles, routeSeed) {
     return Math.hypot(dx, dy);
   }
 
-  open.push({ gx: sx, gy: sy, g: 0, f: heuristic(sx, sy), tie: hashInt(routeSeed, sx, sy, 1) });
+  open.push({
+    gx: sx,
+    gy: sy,
+    g: 0,
+    f: heuristic(sx, sy),
+    tie: hashInt(routeSeed, sx, sy, 1),
+  });
 
   const neighbors = [
     [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
-    [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
+    [1, 1, Math.SQRT2], [1, -1, Math.SQRT2],
+    [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
   ];
 
   let iterations = 0;
@@ -1191,6 +1259,7 @@ function routeAStar(start, goal, obstacles, routeSeed) {
       let walkKey = currentKey;
       let walk = { gx: current.gx, gy: current.gy };
       path.push(world(walk.gx, walk.gy));
+
       while (walkKey !== startKey) {
         const prev = cameFrom.get(walkKey);
         if (!prev) break;
@@ -1198,21 +1267,30 @@ function routeAStar(start, goal, obstacles, routeSeed) {
         walkKey = gridKey(walk.gx, walk.gy);
         path.push(world(walk.gx, walk.gy));
       }
+
       path.reverse();
       return path;
     }
-
-    const currentWorld = world(current.gx, current.gy);
 
     for (const [ox, oy, baseCost] of neighbors) {
       const nx = current.gx + ox;
       const ny = current.gy + oy;
       if (nx < minX || nx > maxX || ny < minY || ny > maxY) continue;
-      const nextKey = gridKey(nx, ny);
-      if (closed.has(nextKey)) continue;
 
-      const nextWorld = world(nx, ny);
-      if (!segmentClear(currentWorld, nextWorld, obstacles)) continue;
+      const nextKey = gridKey(nx, ny);
+      if (closed.has(nextKey) || blocked.has(nextKey)) continue;
+
+      // Prevent diagonal corner cutting through a blocked room footprint.
+      if (
+        ox !== 0 &&
+        oy !== 0 &&
+        (
+          blocked.has(gridKey(current.gx + ox, current.gy)) ||
+          blocked.has(gridKey(current.gx, current.gy + oy))
+        )
+      ) {
+        continue;
+      }
 
       const noise = hash01(routeSeed, nx, ny, 712) * 0.045;
       const tentative = current.g + baseCost + noise;
@@ -1222,7 +1300,14 @@ function routeAStar(start, goal, obstacles, routeSeed) {
       gScore.set(nextKey, tentative);
       cameFrom.set(nextKey, { gx: current.gx, gy: current.gy });
       const f = tentative + heuristic(nx, ny);
-      open.push({ gx: nx, gy: ny, g: tentative, f, tie: hashInt(routeSeed, nx, ny, 713) });
+
+      open.push({
+        gx: nx,
+        gy: ny,
+        g: tentative,
+        f,
+        tie: hashInt(routeSeed, nx, ny, 713),
+      });
     }
   }
 

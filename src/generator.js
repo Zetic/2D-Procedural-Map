@@ -1,8 +1,8 @@
-export const GENERATOR_VERSION = 8;
+export const GENERATOR_VERSION = 9;
 
 export const FABRIC_CELL = 15;
 export const FABRIC_CHUNK = 720;
-export const MACRO_SIZE = 860;
+export const MACRO_SIZE = 420;
 export const QUERY_HALO = FABRIC_CELL * 2;
 
 const TAU = Math.PI * 2;
@@ -14,7 +14,13 @@ const FLOOR_PALETTES = [
 ];
 
 const RASTER_N = FABRIC_CHUNK / FABRIC_CELL;
-const PRIMITIVE_HALO = MACRO_SIZE * 1.9;
+const PRIMITIVE_HALO = 1650;
+const SITE_GRID = MACRO_SIZE;
+const SITE_MIN_DISTANCE = 380;
+const SITE_NEIGHBOR_RADIUS = 2;
+const SITE_PARENT_RADIUS = 5;
+const MERGE_RADIUS = 265;
+const INFILL_GRID = 150;
 
 function mix32(x) {
   x ^= x >>> 16;
@@ -150,219 +156,513 @@ function nonZeroId(value) {
   return id === 0 ? 1 : id;
 }
 
-function macroNode(seed, mx, my) {
-  const jitter = MACRO_SIZE * 0.34;
+function siteCandidate(seed, sx, sy) {
+  const root = sx === 0 && sy === 0;
+  const jitter = SITE_GRID * 0.44;
+
   return {
-    x: mx * MACRO_SIZE +
-      MACRO_SIZE * 0.5 +
-      hashSigned(seed, mx, my, 11) * jitter,
-    y: my * MACRO_SIZE +
-      MACRO_SIZE * 0.5 +
-      hashSigned(seed, mx, my, 12) * jitter,
+    sx,
+    sy,
+    x:
+      sx * SITE_GRID +
+      SITE_GRID * 0.5 +
+      hashSigned(seed, sx, sy, 11) * jitter,
+    y:
+      sy * SITE_GRID +
+      SITE_GRID * 0.5 +
+      hashSigned(seed, sx, sy, 12) * jitter,
+    priority:
+      root
+        ? 0
+        : hashInt(seed, sx, sy, 13),
   };
 }
 
-function sign(v) {
-  return v < 0 ? -1 : v > 0 ? 1 : 0;
-}
-
-export function parentCell(seedText, mx, my) {
-  const seed = hashString(
-    'v' + GENERATOR_VERSION + ':' + String(seedText),
-  );
-  return parentFor(seed, mx, my);
-}
-
-function parentFor(seed, mx, my) {
-  if (mx === 0 && my === 0) return null;
-  if (mx === 0) return [0, my - sign(my)];
-  if (my === 0) return [mx - sign(mx), 0];
-
-  const roll = hash01(seed, mx, my, 21);
-
-  if (roll < 0.52) {
-    return [mx - sign(mx), my - sign(my)];
-  }
-  if (roll < 0.76) {
-    return [mx - sign(mx), my];
+function siteWins(a, b) {
+  if (a.priority !== b.priority) {
+    return a.priority < b.priority;
   }
 
-  return [mx, my - sign(my)];
-}
-
-function canonicalEdgeKey(ax, ay, bx, by) {
-  if (ax < bx || (ax === bx && ay <= by)) {
-    return ax + ',' + ay + '|' + bx + ',' + by;
+  if (a.sx !== b.sx) {
+    return a.sx < b.sx;
   }
-  return bx + ',' + by + '|' + ax + ',' + ay;
+
+  return a.sy < b.sy;
 }
 
-function edgeSeed(seed, ax, ay, bx, by, salt = 0) {
-  return mix32(
-    hashString(canonicalEdgeKey(ax, ay, bx, by)) ^
-    seed ^
-    salt,
-  );
-}
+function isAcceptedSite(seed, sx, sy) {
+  const candidate =
+    siteCandidate(seed, sx, sy);
 
-function optionalLinks(seed, mx, my) {
-  const candidates = [
-    [mx + 1, my, 101],
-    [mx, my + 1, 102],
-    [mx + 1, my + 1, 103],
-    [mx + 1, my - 1, 104],
-  ];
-
-  const out = [];
-
-  for (const [nx, ny, salt] of candidates) {
-    const parent = parentFor(seed, mx, my);
-    const neighborParent = parentFor(seed, nx, ny);
-
-    if (
-      (parent && parent[0] === nx && parent[1] === ny) ||
-      (
-        neighborParent &&
-        neighborParent[0] === mx &&
-        neighborParent[1] === my
-      )
+  for (
+    let oy = -SITE_NEIGHBOR_RADIUS;
+    oy <= SITE_NEIGHBOR_RADIUS;
+    oy++
+  ) {
+    for (
+      let ox = -SITE_NEIGHBOR_RADIUS;
+      ox <= SITE_NEIGHBOR_RADIUS;
+      ox++
     ) {
-      continue;
+      if (ox === 0 && oy === 0) continue;
+
+      const other =
+        siteCandidate(
+          seed,
+          sx + ox,
+          sy + oy,
+        );
+
+      const dx =
+        other.x - candidate.x;
+      const dy =
+        other.y - candidate.y;
+
+      if (
+        dx * dx + dy * dy >=
+        SITE_MIN_DISTANCE *
+          SITE_MIN_DISTANCE
+      ) {
+        continue;
+      }
+
+      if (siteWins(other, candidate)) {
+        return false;
+      }
     }
-
-    const roll =
-      (edgeSeed(seed, mx, my, nx, ny, salt) >>> 0) /
-      4294967296;
-
-    const threshold =
-      salt === 103 || salt === 104 ? 0.10 : 0.13;
-
-    if (roll < threshold) out.push([nx, ny]);
   }
 
-  return out;
+  return true;
 }
 
-function routePolyline(seed, ax, ay, bx, by, salt) {
-  const a = macroNode(seed, ax, ay);
-  const b = macroNode(seed, bx, by);
-  const rng = seededRng(
-    edgeSeed(seed, ax, ay, bx, by, salt),
+export function isSiteCell(
+  seedText,
+  sx,
+  sy,
+) {
+  const seed = hashString(
+    'v' +
+    GENERATOR_VERSION +
+    ':' +
+    String(seedText),
   );
 
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const dist = Math.hypot(dx, dy) || 1;
-  const tx = dx / dist;
-  const ty = dy / dist;
-  const nx = -ty;
-  const ny = tx;
-
-  const bends = 5 + Math.floor(rng() * 4);
-  const points = [{ ...a }];
-  let previousOffset = 0;
-
-  for (let i = 1; i < bends; i++) {
-    const t = i / bends;
-    const envelope = Math.sin(Math.PI * t);
-    const targetOffset =
-      (rng() * 2 - 1) *
-      MACRO_SIZE *
-      (0.11 + rng() * 0.085) *
-      envelope;
-
-    previousOffset =
-      previousOffset * 0.36 +
-      targetOffset * 0.64;
-
-    const tangentJitter =
-      (rng() * 2 - 1) * MACRO_SIZE * 0.045;
-
-    points.push({
-      x:
-        a.x +
-        dx * t +
-        nx * previousOffset +
-        tx * tangentJitter,
-      y:
-        a.y +
-        dy * t +
-        ny * previousOffset +
-        ty * tangentJitter,
-    });
-  }
-
-  points.push({ ...b });
-  return points;
+  return isAcceptedSite(
+    seed,
+    sx,
+    sy,
+  );
 }
 
-function resamplePolyline(points, step, seedValue) {
-  const rng = seededRng(seedValue);
-  const out = [];
+export function sitePosition(
+  seedText,
+  sx,
+  sy,
+) {
+  const seed = hashString(
+    'v' +
+    GENERATOR_VERSION +
+    ':' +
+    String(seedText),
+  );
 
-  for (let i = 0; i < points.length - 1; i++) {
-    const a = points[i];
-    const b = points[i + 1];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len = Math.hypot(dx, dy);
+  const site =
+    siteCandidate(seed, sx, sy);
 
-    if (len <= 1e-6) continue;
+  return {
+    x: site.x,
+    y: site.y,
+  };
+}
 
-    const localStep = step * (0.82 + rng() * 0.30);
-    const pieces = Math.max(
-      1,
-      Math.ceil(len / localStep),
+function rootDistanceSq(
+  seed,
+  sx,
+  sy,
+) {
+  const root =
+    siteCandidate(seed, 0, 0);
+
+  const site =
+    siteCandidate(seed, sx, sy);
+
+  const dx =
+    site.x - root.x;
+  const dy =
+    site.y - root.y;
+
+  return dx * dx + dy * dy;
+}
+
+function parentFor(
+  seed,
+  sx,
+  sy,
+) {
+  if (sx === 0 && sy === 0) {
+    return null;
+  }
+
+  if (!isAcceptedSite(seed, sx, sy)) {
+    return null;
+  }
+
+  const source =
+    siteCandidate(seed, sx, sy);
+
+  const sourceRank =
+    rootDistanceSq(
+      seed,
+      sx,
+      sy,
     );
 
-    for (let j = 0; j < pieces; j++) {
-      const t = j / pieces;
+  let best = null;
+
+  for (
+    let radius = 1;
+    radius <= SITE_PARENT_RADIUS;
+    radius++
+  ) {
+    for (
+      let oy = -radius;
+      oy <= radius;
+      oy++
+    ) {
+      for (
+        let ox = -radius;
+        ox <= radius;
+        ox++
+      ) {
+        if (
+          Math.max(
+            Math.abs(ox),
+            Math.abs(oy),
+          ) !== radius
+        ) {
+          continue;
+        }
+
+        const nx = sx + ox;
+        const ny = sy + oy;
+
+        if (
+          !isAcceptedSite(
+            seed,
+            nx,
+            ny,
+          )
+        ) {
+          continue;
+        }
+
+        const rank =
+          rootDistanceSq(
+            seed,
+            nx,
+            ny,
+          );
+
+        if (rank >= sourceRank) {
+          continue;
+        }
+
+        const target =
+          siteCandidate(
+            seed,
+            nx,
+            ny,
+          );
+
+        const distance =
+          Math.hypot(
+            target.x - source.x,
+            target.y - source.y,
+          );
+
+        const score =
+          distance *
+          (
+            0.90 +
+            hash01(
+              seed,
+              sx * 173 + nx,
+              sy * 179 + ny,
+              25,
+            ) *
+              0.20
+          );
+
+        if (
+          !best ||
+          score < best.score ||
+          (
+            score === best.score &&
+            (
+              nx < best.x ||
+              (
+                nx === best.x &&
+                ny < best.y
+              )
+            )
+          )
+        ) {
+          best = {
+            x: nx,
+            y: ny,
+            score,
+          };
+        }
+      }
+    }
+
+    if (
+      best &&
+      best.score <
+        (radius + 0.45) *
+          SITE_GRID
+    ) {
+      break;
+    }
+  }
+
+  if (best) {
+    return [best.x, best.y];
+  }
+
+  return [0, 0];
+}
+
+export function parentCell(
+  seedText,
+  sx,
+  sy,
+) {
+  const seed = hashString(
+    'v' +
+    GENERATOR_VERSION +
+    ':' +
+    String(seedText),
+  );
+
+  return parentFor(
+    seed,
+    sx,
+    sy,
+  );
+}
+
+function acceptedNeighbors(
+  seed,
+  sx,
+  sy,
+  radius,
+) {
+  const source =
+    siteCandidate(seed, sx, sy);
+
+  const out = [];
+
+  for (
+    let oy = -radius;
+    oy <= radius;
+    oy++
+  ) {
+    for (
+      let ox = -radius;
+      ox <= radius;
+      ox++
+    ) {
+      if (ox === 0 && oy === 0) {
+        continue;
+      }
+
+      const nx = sx + ox;
+      const ny = sy + oy;
+
+      if (
+        !isAcceptedSite(
+          seed,
+          nx,
+          ny,
+        )
+      ) {
+        continue;
+      }
+
+      const target =
+        siteCandidate(
+          seed,
+          nx,
+          ny,
+        );
+
       out.push({
-        x: a.x + dx * t,
-        y: a.y + dy * t,
-        angle: Math.atan2(dy, dx),
+        x: nx,
+        y: ny,
+        distance:
+          Math.hypot(
+            target.x - source.x,
+            target.y - source.y,
+          ),
       });
     }
   }
 
-  const last = points[points.length - 1];
-  const before = points[Math.max(0, points.length - 2)];
+  out.sort((a, b) => {
+    if (a.distance !== b.distance) {
+      return a.distance - b.distance;
+    }
 
-  out.push({
-    x: last.x,
-    y: last.y,
-    angle: Math.atan2(
-      last.y - before.y,
-      last.x - before.x,
-    ),
+    if (a.x !== b.x) {
+      return a.x - b.x;
+    }
+
+    return a.y - b.y;
   });
+
+  return out;
+}
+
+function siteKey(sx, sy) {
+  return sx + ',' + sy;
+}
+
+function pairSiteKey(
+  ax,
+  ay,
+  bx,
+  by,
+) {
+  const a = siteKey(ax, ay);
+  const b = siteKey(bx, by);
+
+  return a < b
+    ? a + '|' + b
+    : b + '|' + a;
+}
+
+function optionalLinks(
+  seed,
+  sx,
+  sy,
+) {
+  const parent =
+    parentFor(seed, sx, sy);
+
+  const out = [];
+
+  for (
+    const neighbor of
+    acceptedNeighbors(
+      seed,
+      sx,
+      sy,
+      3,
+    )
+  ) {
+    const nx = neighbor.x;
+    const ny = neighbor.y;
+
+    if (
+      nx < sx ||
+      (nx === sx && ny <= sy)
+    ) {
+      continue;
+    }
+
+    if (
+      parent &&
+      parent[0] === nx &&
+      parent[1] === ny
+    ) {
+      continue;
+    }
+
+    const neighborParent =
+      parentFor(seed, nx, ny);
+
+    if (
+      neighborParent &&
+      neighborParent[0] === sx &&
+      neighborParent[1] === sy
+    ) {
+      continue;
+    }
+
+    if (
+      neighbor.distance >
+      SITE_GRID * 2.75
+    ) {
+      continue;
+    }
+
+    const edgeHash =
+      hashString(
+        pairSiteKey(
+          sx,
+          sy,
+          nx,
+          ny,
+        ),
+      ) ^
+      seed ^
+      0x5a61d7;
+
+    const roll =
+      (mix32(edgeHash) >>> 0) /
+      4294967296;
+
+    const threshold =
+      neighbor.distance <
+      SITE_GRID * 1.55
+        ? 0.16
+        : 0.075;
+
+    if (roll < threshold) {
+      out.push([nx, ny]);
+    }
+
+    if (out.length >= 2) {
+      break;
+    }
+  }
 
   return out;
 }
 
 function primitiveAabb(primitive) {
   if (primitive.shape === 'ellipse') {
-    const r = Math.max(
-      primitive.w,
-      primitive.h,
-    ) * 0.5;
+    const radius =
+      Math.max(
+        primitive.w,
+        primitive.h,
+      ) * 0.5;
 
     return {
-      minX: primitive.x - r,
-      maxX: primitive.x + r,
-      minY: primitive.y - r,
-      maxY: primitive.y + r,
+      minX: primitive.x - radius,
+      maxX: primitive.x + radius,
+      minY: primitive.y - radius,
+      maxY: primitive.y + radius,
     };
   }
 
-  const c = Math.cos(primitive.angle);
-  const s = Math.sin(primitive.angle);
-  const hx = primitive.w * 0.5;
-  const hy = primitive.h * 0.5;
+  const c =
+    Math.cos(primitive.angle);
+
+  const s =
+    Math.sin(primitive.angle);
+
+  const hx =
+    primitive.w * 0.5;
+
+  const hy =
+    primitive.h * 0.5;
 
   const ex =
     Math.abs(c) * hx +
     Math.abs(s) * hy;
+
   const ey =
     Math.abs(s) * hx +
     Math.abs(c) * hy;
@@ -391,592 +691,2126 @@ function makePrimitive(
   shape = 'rect',
 ) {
   const snapped =
-    Math.round(angle / (Math.PI / 12)) *
+    Math.round(
+      angle /
+        (Math.PI / 12),
+    ) *
     (Math.PI / 12);
 
   const primitive = {
     id: nonZeroId(idSeed),
-    spaceId: nonZeroId(spaceId),
-    familySeed: nonZeroId(familySeed),
+    spaceId:
+      nonZeroId(spaceId),
+    familySeed:
+      nonZeroId(familySeed),
     colorIndex,
     x,
     y,
     angle:
       snapped +
-      hashSigned(seed, idSeed, spaceId, 7201) * 0.045,
+      hashSigned(
+        seed,
+        idSeed,
+        spaceId,
+        7201,
+      ) *
+        0.055,
     w,
     h,
     kind,
     major,
     shape,
-    priority: mix32(
-      idSeed ^
-      spaceId ^
-      familySeed ^
-      0x38a4df71,
-    ),
+    priority:
+      mix32(
+        idSeed ^
+        spaceId ^
+        familySeed ^
+        0x38a4df71,
+      ),
   };
 
-  primitive.aabb = primitiveAabb(primitive);
+  primitive.aabb =
+    primitiveAabb(primitive);
+
   return primitive;
 }
 
-function spaceIdFor(baseSeed, group, salt) {
+function spaceIdFor(
+  baseSeed,
+  group,
+  salt,
+) {
   return nonZeroId(
     baseSeed ^
-    Math.imul(group + 1, 0x9e3779b1) ^
+    Math.imul(
+      group + 1,
+      0x9e3779b1,
+    ) ^
     salt,
   );
 }
 
-function branchRooms(
-  seed,
-  start,
-  baseAngle,
-  branchSeed,
-  profile,
-  familySeed,
-  colorIndex,
-  initialSpaceId,
-  depth = 0,
+function angleDelta(
+  from,
+  to,
 ) {
-  const rng = seededRng(branchSeed);
-  const out = [];
+  let delta =
+    (to - from) %
+    TAU;
 
-  let x = start.x;
-  let y = start.y;
-  let angle = baseAngle;
+  if (delta > Math.PI) {
+    delta -= TAU;
+  }
 
-  const steps =
-    2 +
-    Math.floor(rng() * (1 + profile.branch * 2)) +
+  if (delta < -Math.PI) {
+    delta += TAU;
+  }
+
+  return delta;
+}
+
+function blendAngle(
+  from,
+  to,
+  amount,
+) {
+  return (
+    from +
+    angleDelta(from, to) *
+      clamp(amount, 0, 1)
+  );
+}
+
+function roomDimensions(
+  rng,
+  profile,
+  kind,
+) {
+  const scale =
+    0.74 +
+    profile.scale * 0.72;
+
+  if (kind === 'chamber') {
+    return {
+      w:
+        (150 + rng() * 175) *
+        scale,
+      h:
+        (110 + rng() * 145) *
+        scale,
+    };
+  }
+
+  if (kind === 'gallery') {
+    return {
+      w:
+        (155 + rng() * 145) *
+        scale,
+      h:
+        (42 + rng() * 50) *
+        scale,
+    };
+  }
+
+  if (kind === 'transverse') {
+    return {
+      w:
+        (58 + rng() * 70) *
+        scale,
+      h:
+        (125 + rng() * 120) *
+        scale,
+    };
+  }
+
+  if (kind === 'suite') {
+    return {
+      w:
+        (115 + rng() * 120) *
+        scale,
+      h:
+        (82 + rng() * 105) *
+        scale,
+    };
+  }
+
+  if (kind === 'cell') {
+    return {
+      w:
+        (48 + rng() * 52) *
+        scale,
+      h:
+        (42 + rng() * 48) *
+        scale,
+    };
+  }
+
+  return {
+    w:
+      (78 + rng() * 105) *
+      scale,
+    h:
+      (62 + rng() * 92) *
+      scale,
+  };
+}
+
+function chooseRoomKind(
+  rng,
+  profile,
+  sinceMajor,
+) {
+  if (sinceMajor >= 3) {
+    return 'chamber';
+  }
+
+  const roll = rng();
+
+  if (
+    roll <
+    0.11 +
+      profile.chamber * 0.10
+  ) {
+    return 'chamber';
+  }
+
+  if (roll < 0.25) {
+    return 'gallery';
+  }
+
+  if (roll < 0.38) {
+    return 'transverse';
+  }
+
+  if (roll < 0.55) {
+    return 'suite';
+  }
+
+  if (
+    roll <
+    0.66 -
+      profile.openness * 0.10
+  ) {
+    return 'cell';
+  }
+
+  return 'room';
+}
+
+function addCompoundParts(
+  out,
+  seed,
+  base,
+  idSeed,
+  rng,
+  profile,
+) {
+  if (
+    base.kind === 'gallery' ||
+    base.kind === 'cell'
+  ) {
+    return;
+  }
+
+  const roll = rng();
+
+  if (roll > 0.28) {
+    return;
+  }
+
+  const c =
+    Math.cos(base.angle);
+
+  const s =
+    Math.sin(base.angle);
+
+  const side =
+    rng() < 0.5 ? -1 : 1;
+
+  const wingW =
+    base.w *
+    (0.38 + rng() * 0.36);
+
+  const wingH =
+    base.h *
+    (0.42 + rng() * 0.44);
+
+  const offsetAlong =
+    base.w *
     (
-      profile.density > 0.72 &&
-      rng() < 0.45
+      0.18 +
+      rng() * 0.17
+    ) *
+    (rng() < 0.5 ? -1 : 1);
+
+  const offsetCross =
+    base.h *
+    (
+      0.34 +
+      rng() * 0.18
+    ) *
+    side;
+
+  out.push(
+    makePrimitive(
+      seed,
+      mix32(
+        idSeed ^
+        0x53b7121,
+      ),
+      base.spaceId,
+      base.familySeed,
+      base.colorIndex,
+      base.x +
+        c * offsetAlong -
+        s * offsetCross,
+      base.y +
+        s * offsetAlong +
+        c * offsetCross,
+      base.angle,
+      wingW,
+      wingH,
+      'compound-wing',
+      false,
+    ),
+  );
+
+  if (
+    base.major &&
+    roll < 0.12 &&
+    profile.openness < 0.72
+  ) {
+    const secondCross =
+      -offsetCross;
+
+    out.push(
+      makePrimitive(
+        seed,
+        mix32(
+          idSeed ^
+          0x2e816b9,
+        ),
+        base.spaceId,
+        base.familySeed,
+        base.colorIndex,
+        base.x -
+          c * offsetAlong -
+          s * secondCross,
+        base.y -
+          s * offsetAlong +
+          c * secondCross,
+        base.angle,
+        wingW *
+          (0.82 + rng() * 0.26),
+        wingH *
+          (0.82 + rng() * 0.24),
+        'compound-wing',
+        false,
+      ),
+    );
+  }
+}
+
+function addAnnexCluster(
+  out,
+  seed,
+  base,
+  idSeed,
+  rng,
+  profile,
+) {
+  const count =
+    1 +
+    (
+      rng() <
+      0.32 +
+        profile.density * 0.20
         ? 1
         : 0
     );
 
-  for (let i = 0; i < steps; i++) {
-    angle +=
-      (rng() - 0.5) *
-      (0.50 + profile.turn * 0.65);
+  for (
+    let index = 0;
+    index < count;
+    index++
+  ) {
+    const side =
+      index === 0
+        ? (
+            rng() < 0.5
+              ? -1
+              : 1
+          )
+        : (
+            rng() < 0.5
+              ? -1
+              : 1
+          );
 
-    if (rng() < 0.64) {
-      angle =
-        Math.round(angle / (Math.PI / 12)) *
-        (Math.PI / 12);
-    }
+    const angle =
+      base.angle +
+      side *
+        (
+          Math.PI / 2 +
+          hashSigned(
+            seed,
+            idSeed,
+            index,
+            7301,
+          ) *
+            0.22
+        );
 
-    const scale =
-      0.68 + profile.scale * 0.62;
+    const w =
+      60 + rng() * 100;
 
-    const major =
-      rng() <
-      (0.07 + profile.chamber * 0.10);
+    const h =
+      52 + rng() * 86;
 
-    const along = major
-      ? (132 + rng() * 138) * scale
-      : (78 + rng() * 92) * scale;
-
-    const cross = major
-      ? (98 + rng() * 112) * scale
-      : (50 + rng() * 78) * scale;
-
-    const idSeed = mix32(
-      branchSeed ^
-      Math.imul(i + 1, 0x9e3779b1),
-    );
-
-    const group =
-      i === 0
-        ? -1
-        : Math.floor((i - 1) / 2);
+    const distance =
+      base.h * 0.34 +
+      h * 0.30;
 
     const spaceId =
-      i === 0
-        ? initialSpaceId
-        : spaceIdFor(
-            branchSeed,
-            group,
-            0x41bf27d,
-          );
-
-    const shape =
-      major && rng() < 0.06
-        ? 'ellipse'
-        : 'rect';
-
-    const roomColor =
-      i === 0
-        ? colorIndex
-        : spacePalette(
-            seed,
-            familySeed,
-            spaceId,
-            x,
-            y,
-            colorIndex,
-          );
-
-    const room = makePrimitive(
-      seed,
-      idSeed,
-      spaceId,
-      familySeed,
-      roomColor,
-      x,
-      y,
-      angle,
-      along,
-      cross,
-      major
-        ? 'branch-chamber'
-        : 'branch-room',
-      major,
-      shape,
-    );
-
-    out.push(room);
-
-    const advance =
-      along * (0.34 + rng() * 0.20);
-
-    x += Math.cos(angle) * advance;
-    y += Math.sin(angle) * advance;
-
-    if (
-      depth < 1 &&
-      i > 0 &&
-      rng() <
-        0.18 + profile.branch * 0.18
-    ) {
-      const side = rng() < 0.5 ? -1 : 1;
-      const forkAngle =
-        angle +
-        side *
-          (0.72 + rng() * 0.58);
-
-      const fork = branchRooms(
-        seed,
-        { x, y },
-        forkAngle,
-        mix32(branchSeed ^ 0x5f356495 ^ i),
-        profile,
-        familySeed,
-        colorIndex,
-        room.spaceId,
-        depth + 1,
+      spaceIdFor(
+        idSeed,
+        index,
+        0x291bd1,
       );
 
-      out.push(...fork.slice(0, 3));
-    }
-  }
+    const x =
+      base.x +
+      Math.cos(angle) *
+        distance;
 
-  return out;
+    const y =
+      base.y +
+      Math.sin(angle) *
+        distance;
+
+    const colorIndex =
+      spacePalette(
+        seed,
+        base.familySeed,
+        spaceId,
+        x,
+        y,
+        base.colorIndex,
+      );
+
+    out.push(
+      makePrimitive(
+        seed,
+        mix32(
+          idSeed ^
+          0x6a55d9 ^
+          index,
+        ),
+        spaceId,
+        base.familySeed,
+        colorIndex,
+        x,
+        y,
+        base.angle,
+        w,
+        h,
+        'annex',
+        false,
+      ),
+    );
+  }
 }
 
-function edgeFabric(
+function growFreeBranch(
   seed,
-  ax,
-  ay,
-  bx,
-  by,
-  salt,
-  primary,
+  start,
+  startAngle,
+  familySeed,
+  branchSeed,
+  initialSpaceId,
+  colorIndex,
+  depth,
 ) {
-  const familySeed = edgeSeed(
-    seed,
-    ax,
-    ay,
-    bx,
-    by,
-    salt,
-  );
-
-  const polyline = routePolyline(
-    seed,
-    ax,
-    ay,
-    bx,
-    by,
-    salt,
-  );
-
-  const routeSamples = resamplePolyline(
-    polyline,
-    primary ? 64 : 76,
-    familySeed ^ 0x111ace,
-  );
-
-  const midpoint = routeSamples[
-    Math.floor(routeSamples.length * 0.5)
-  ];
-
-  const colorIndex = familyPalette(
-    seed,
-    familySeed,
-    midpoint.x,
-    midpoint.y,
-  );
+  const rng =
+    seededRng(branchSeed);
 
   const out = [];
-  const rng = seededRng(
-    familySeed ^ 0x7aa8b3,
-  );
+
+  let x = start.x;
+  let y = start.y;
+  let heading = startAngle;
+  let previousAlong = 92;
+  let sinceMajor = 0;
+
+  const profileAtStart =
+    fieldProfile(
+      seed,
+      x,
+      y,
+    );
+
+  const steps =
+    2 +
+    Math.floor(
+      rng() *
+        (
+          2 +
+          profileAtStart.branch * 2
+        ),
+    );
 
   const groupSpan =
     1 +
     (
-      mix32(familySeed ^ 0x35aa07) % 3
+      mix32(
+        branchSeed ^
+        0x11a6c1,
+      ) %
+      3
     );
 
   for (
-    let i = 0;
-    i < routeSamples.length;
-    i++
+    let step = 0;
+    step < steps;
+    step++
   ) {
-    const point = routeSamples[i];
-    const profile = fieldProfile(
-      seed,
-      point.x,
-      point.y,
-    );
+    const profile =
+      fieldProfile(
+        seed,
+        x,
+        y,
+      );
 
-    const scale =
-      0.72 + profile.scale * 0.84;
+    heading +=
+      (rng() - 0.5) *
+      (
+        0.58 +
+        profile.turn * 0.72
+      );
 
-    const major =
-      i % (primary ? 4 : 5) === 0 ||
-      rng() <
-        0.08 + profile.chamber * 0.12;
-
-    let along;
-    let cross;
-    let kind;
-
-    if (major) {
-      along =
-        (150 + rng() * 180) * scale;
-      cross =
-        (100 + rng() * 122) * scale;
-      kind = 'chamber';
-    } else {
-      const roll = rng();
-
-      if (roll < 0.22) {
-        along =
-          (120 + rng() * 130) * scale;
-        cross =
-          (45 + rng() * 42) * scale;
-        kind = 'gallery';
-      } else if (roll < 0.42) {
-        along =
-          (62 + rng() * 74) * scale;
-        cross =
-          (105 + rng() * 105) * scale;
-        kind = 'transverse-room';
-      } else {
-        along =
-          (88 + rng() * 110) * scale;
-        cross =
-          (58 + rng() * 88) * scale;
-        kind = 'room';
-      }
+    if (rng() < 0.66) {
+      heading =
+        Math.round(
+          heading /
+            (Math.PI / 12),
+        ) *
+        (Math.PI / 12);
     }
 
-    // Primary events must overlap physically. Global connectivity is carried
-    // by ordinary rooms and chambers, never a separate corridor layer.
-    along = Math.max(
-      along,
-      primary ? 94 : 84,
-    );
+    const kind =
+      chooseRoomKind(
+        rng,
+        profile,
+        sinceMajor,
+      );
 
-    const idSeed = mix32(
-      familySeed ^
-      Math.imul(i + 1, 0x27d4eb2d),
-    );
+    const dims =
+      roomDimensions(
+        rng,
+        profile,
+        kind,
+      );
 
-    const spaceId = spaceIdFor(
-      familySeed,
-      Math.floor(i / groupSpan),
-      0x55c13bd,
-    );
+    const along =
+      kind === 'transverse'
+        ? dims.h
+        : dims.w;
 
-    const shape =
-      major && rng() < 0.035
-        ? 'ellipse'
-        : 'rect';
+    const advance =
+      Math.max(
+        34,
+        Math.min(
+          previousAlong * 0.36 +
+            along * 0.28,
+          104,
+        ),
+      );
 
-    const roomColor = spacePalette(
-      seed,
-      familySeed,
-      spaceId,
-      point.x,
-      point.y,
-      colorIndex,
-    );
+    x +=
+      Math.cos(heading) *
+      advance;
 
-    const room = makePrimitive(
-      seed,
-      idSeed,
-      spaceId,
-      familySeed,
-      roomColor,
-      point.x,
-      point.y,
-      point.angle,
-      along,
-      cross,
-      kind,
-      major,
-      shape,
-    );
+    y +=
+      Math.sin(heading) *
+      advance;
+
+    const group =
+      Math.floor(
+        step / groupSpan,
+      );
+
+    const spaceId =
+      step === 0
+        ? initialSpaceId
+        : spaceIdFor(
+            branchSeed,
+            group,
+            0x5c3117,
+          );
+
+    const roomColor =
+      spacePalette(
+        seed,
+        familySeed,
+        spaceId,
+        x,
+        y,
+        colorIndex,
+      );
+
+    const idSeed =
+      mix32(
+        branchSeed ^
+        Math.imul(
+          step + 1,
+          0x27d4eb2d,
+        ),
+      );
+
+    const major =
+      kind === 'chamber';
+
+    const room =
+      makePrimitive(
+        seed,
+        idSeed,
+        spaceId,
+        familySeed,
+        roomColor,
+        x,
+        y,
+        heading,
+        dims.w,
+        dims.h,
+        kind,
+        major,
+        major &&
+        rng() < 0.045
+          ? 'ellipse'
+          : 'rect',
+      );
 
     out.push(room);
 
-    const branchChance =
-      (primary ? 0.18 : 0.12) +
-      profile.branch * 0.18 +
-      profile.density * 0.08;
-
-    if (
-      i > 0 &&
-      i < routeSamples.length - 1 &&
-      rng() < branchChance
-    ) {
-      const side =
-        rng() < 0.5 ? -1 : 1;
-
-      const branchAngle =
-        point.angle +
-        side *
-          (
-            0.72 +
-            rng() *
-              (0.72 + profile.turn * 0.55)
-          );
-
-      const branch = branchRooms(
-        seed,
-        {
-          x:
-            point.x +
-            Math.cos(branchAngle) *
-              cross *
-              0.18,
-          y:
-            point.y +
-            Math.sin(branchAngle) *
-              cross *
-              0.18,
-        },
-        branchAngle,
-        mix32(idSeed ^ 0x6217aa2d),
-        profile,
-        familySeed,
-        colorIndex,
-        room.spaceId,
-      );
-
-      out.push(...branch);
-    }
+    addCompoundParts(
+      out,
+      seed,
+      room,
+      idSeed,
+      rng,
+      profile,
+    );
 
     if (
       major &&
       rng() <
-        0.23 + profile.density * 0.16
+        0.20 +
+        profile.density * 0.16
+    ) {
+      addAnnexCluster(
+        out,
+        seed,
+        room,
+        idSeed,
+        rng,
+        profile,
+      );
+    }
+
+    sinceMajor =
+      major
+        ? 0
+        : sinceMajor + 1;
+
+    previousAlong = along;
+
+    if (
+      depth < 1 &&
+      step > 0 &&
+      rng() <
+        0.14 +
+        profile.branch * 0.13
     ) {
       const side =
-        rng() < 0.5 ? -1 : 1;
+        rng() < 0.5
+          ? -1
+          : 1;
 
-      const annexAngle =
-        point.angle + side * Math.PI / 2;
-
-      const annexCount =
-        1 + (rng() < 0.34 ? 1 : 0);
-
-      for (
-        let annexIndex = 0;
-        annexIndex < annexCount;
-        annexIndex++
-      ) {
-        const aw =
-          (70 + rng() * 105) * scale;
-        const ah =
-          (55 + rng() * 95) * scale;
-
-        const distance =
-          cross * 0.36 +
-          ah * (0.30 + rng() * 0.18);
-
-        const annexId = mix32(
-          idSeed ^
-          0x44bb3311 ^
-          annexIndex,
-        );
-
-        const annexSpace = spaceIdFor(
-          idSeed,
-          annexIndex,
-          0x7da4f9,
-        );
-
-        const annexX =
-          point.x +
-          Math.cos(annexAngle) *
-            distance;
-
-        const annexY =
-          point.y +
-          Math.sin(annexAngle) *
-            distance;
-
-        const annexColor =
-          spacePalette(
-            seed,
-            familySeed,
-            annexSpace,
-            annexX,
-            annexY,
-            colorIndex,
-          );
-
-        out.push(
-          makePrimitive(
-            seed,
-            annexId,
-            annexSpace,
-            familySeed,
-            annexColor,
-            annexX,
-            annexY,
-            point.angle,
-            aw,
-            ah,
-            'annex',
-            false,
+      const fork =
+        growFreeBranch(
+          seed,
+          { x, y },
+          heading +
+            side *
+              (
+                0.78 +
+                rng() * 0.52
+              ),
+          familySeed,
+          mix32(
+            branchSeed ^
+            0x5f356495 ^
+            step,
           ),
+          room.spaceId,
+          colorIndex,
+          depth + 1,
         );
-      }
+
+      out.push(
+        ...fork.slice(0, 4),
+      );
     }
   }
 
   return out;
 }
 
-function rootBurst(seed) {
-  const node = macroNode(seed, 0, 0);
-  const profile = fieldProfile(
-    seed,
-    node.x,
-    node.y,
-  );
+function growFrontToTarget(
+  seed,
+  source,
+  target,
+  familySeed,
+  primary,
+) {
+  const rng =
+    seededRng(
+      familySeed ^
+      0x7aa8b3,
+    );
 
-  const familySeed = hashInt(
-    seed,
-    0,
-    0,
-    9901,
-  );
-
-  const colorIndex = familyPalette(
-    seed,
-    familySeed,
-    node.x,
-    node.y,
-  );
-
-  const rng = seededRng(familySeed);
   const out = [];
 
-  const chains =
-    2 +
-    Math.floor(profile.density * 2);
-
-  for (let chain = 0; chain < chains; chain++) {
-    const angle =
-      rng() * TAU +
-      hashSigned(
-        seed,
-        chain * 41,
-        -chain * 43,
-        9902,
-      ) *
-        0.35;
-
-    const start = {
-      x:
-        node.x +
-        Math.cos(angle) *
-          (20 + rng() * 45),
-      y:
-        node.y +
-        Math.sin(angle) *
-          (20 + rng() * 45),
-    };
-
-    const initialSpace = spaceIdFor(
-      familySeed,
-      chain,
-      0x33a7bf,
+  const initialProfile =
+    fieldProfile(
+      seed,
+      source.x,
+      source.y,
     );
 
-    const branch = branchRooms(
+  const initialBearing =
+    Math.atan2(
+      target.y - source.y,
+      target.x - source.x,
+    );
+
+  let heading =
+    initialBearing +
+    hashSigned(
       seed,
-      start,
-      angle,
+      familySeed,
+      0,
+      7401,
+    ) *
+      0.78;
+
+  const initialSpaceId =
+    spaceIdFor(
+      familySeed,
+      0,
+      0x551bf1,
+    );
+
+  const commonColor =
+    familyPalette(
+      seed,
+      familySeed,
+      source.x,
+      source.y,
+    );
+
+  const initialDims =
+    roomDimensions(
+      rng,
+      initialProfile,
+      (
+        rng() <
+        0.16 +
+          initialProfile.chamber * 0.08
+      )
+        ? 'chamber'
+        : 'room',
+    );
+
+  const initialId =
+    mix32(
+      familySeed ^
+      0x34ad9f,
+    );
+
+  const initialRoom =
+    makePrimitive(
+      seed,
+      initialId,
+      initialSpaceId,
+      familySeed,
+      spacePalette(
+        seed,
+        familySeed,
+        initialSpaceId,
+        source.x,
+        source.y,
+        commonColor,
+      ),
+      source.x,
+      source.y,
+      heading,
+      initialDims.w,
+      initialDims.h,
+      'seed-room',
+      false,
+    );
+
+  out.push(initialRoom);
+
+  addCompoundParts(
+    out,
+    seed,
+    initialRoom,
+    initialId,
+    rng,
+    initialProfile,
+  );
+
+  let x = source.x;
+  let y = source.y;
+  let previousAlong =
+    initialDims.w;
+  let sinceMajor = 0;
+
+  const startDistance =
+    Math.hypot(
+      target.x - source.x,
+      target.y - source.y,
+    );
+
+  const maxSteps =
+    clamp(
+      Math.ceil(
+        startDistance / 64,
+      ) + 7,
+      8,
+      28,
+    );
+
+  const groupSpan =
+    1 +
+    (
       mix32(
         familySeed ^
-        Math.imul(chain + 1, 0x85ebca77),
-      ),
-      profile,
-      familySeed,
-      colorIndex,
-      initialSpace,
+        0x4135a7,
+      ) %
+      3
     );
 
-    out.push(...branch);
+  for (
+    let step = 1;
+    step <= maxSteps;
+    step++
+  ) {
+    const dx =
+      target.x - x;
+
+    const dy =
+      target.y - y;
+
+    const distance =
+      Math.hypot(dx, dy);
+
+    if (distance < 72) {
+      break;
+    }
+
+    const profile =
+      fieldProfile(
+        seed,
+        x,
+        y,
+      );
+
+    const targetBearing =
+      Math.atan2(dy, dx);
+
+    const progress =
+      step / maxSteps;
+
+    const attraction =
+      primary
+        ? clamp(
+            0.19 +
+              progress * 0.31 +
+              (
+                distance < 240
+                  ? 0.16
+                  : 0
+              ),
+            0.19,
+            0.68,
+          )
+        : clamp(
+            0.14 +
+              progress * 0.25,
+            0.14,
+            0.52,
+          );
+
+    heading =
+      blendAngle(
+        heading,
+        targetBearing,
+        attraction,
+      );
+
+    heading +=
+      (rng() - 0.5) *
+      (
+        0.40 +
+        profile.turn * 0.52
+      ) *
+      (
+        1 -
+        progress * 0.42
+      );
+
+    if (
+      rng() <
+      0.58 +
+        profile.openness * 0.12
+    ) {
+      heading =
+        Math.round(
+          heading /
+            (Math.PI / 12),
+        ) *
+        (Math.PI / 12);
+    }
+
+    const kind =
+      chooseRoomKind(
+        rng,
+        profile,
+        sinceMajor,
+      );
+
+    const dims =
+      roomDimensions(
+        rng,
+        profile,
+        kind,
+      );
+
+    const along =
+      kind === 'transverse'
+        ? dims.h
+        : dims.w;
+
+    const nominalAdvance =
+      Math.max(
+        38,
+        Math.min(
+          previousAlong * 0.34 +
+            along * 0.29,
+          108,
+        ),
+      );
+
+    const advance =
+      Math.min(
+        nominalAdvance,
+        Math.max(
+          34,
+          distance * 0.62,
+        ),
+      );
+
+    x +=
+      Math.cos(heading) *
+      advance;
+
+    y +=
+      Math.sin(heading) *
+      advance;
+
+    const group =
+      Math.floor(
+        step / groupSpan,
+      );
+
+    const spaceId =
+      spaceIdFor(
+        familySeed,
+        group,
+        0x41bf27d,
+      );
+
+    const roomColor =
+      spacePalette(
+        seed,
+        familySeed,
+        spaceId,
+        x,
+        y,
+        commonColor,
+      );
+
+    const idSeed =
+      mix32(
+        familySeed ^
+        Math.imul(
+          step + 1,
+          0x9e3779b1,
+        ),
+      );
+
+    const major =
+      kind === 'chamber';
+
+    const room =
+      makePrimitive(
+        seed,
+        idSeed,
+        spaceId,
+        familySeed,
+        roomColor,
+        x,
+        y,
+        heading,
+        dims.w,
+        dims.h,
+        kind,
+        major,
+        major &&
+        rng() < 0.04
+          ? 'ellipse'
+          : 'rect',
+      );
+
+    out.push(room);
+
+    addCompoundParts(
+      out,
+      seed,
+      room,
+      idSeed,
+      rng,
+      profile,
+    );
+
+    if (
+      major &&
+      rng() <
+        0.24 +
+        profile.density * 0.17
+    ) {
+      addAnnexCluster(
+        out,
+        seed,
+        room,
+        idSeed,
+        rng,
+        profile,
+      );
+    }
+
+    const branchChance =
+      (
+        primary
+          ? 0.25
+          : 0.18
+      ) +
+      profile.branch * 0.22 +
+      profile.density * 0.10;
+
+    if (
+      step > 1 &&
+      step < maxSteps - 1 &&
+      rng() < branchChance
+    ) {
+      const side =
+        rng() < 0.5
+          ? -1
+          : 1;
+
+      const branchAngle =
+        heading +
+        side *
+          (
+            0.76 +
+            rng() *
+              (
+                0.62 +
+                profile.turn * 0.40
+              )
+          );
+
+      const branch =
+        growFreeBranch(
+          seed,
+          { x, y },
+          branchAngle,
+          familySeed,
+          mix32(
+            idSeed ^
+            0x6217aa2d,
+          ),
+          room.spaceId,
+          commonColor,
+          0,
+        );
+
+      out.push(...branch);
+    }
+
+    sinceMajor =
+      major
+        ? 0
+        : sinceMajor + 1;
+
+    previousAlong = along;
+  }
+
+  let remaining =
+    Math.hypot(
+      target.x - x,
+      target.y - y,
+    );
+
+  let forcedStep = 0;
+
+  while (
+    remaining > 78 &&
+    forcedStep < 8
+  ) {
+    const bearing =
+      Math.atan2(
+        target.y - y,
+        target.x - x,
+      );
+
+    heading =
+      blendAngle(
+        heading,
+        bearing,
+        0.72,
+      );
+
+    const profile =
+      fieldProfile(
+        seed,
+        x,
+        y,
+      );
+
+    const dims =
+      roomDimensions(
+        rng,
+        profile,
+        forcedStep % 3 === 2
+          ? 'chamber'
+          : 'room',
+      );
+
+    const advance =
+      Math.min(
+        92,
+        Math.max(
+          38,
+          remaining * 0.58,
+        ),
+      );
+
+    x +=
+      Math.cos(heading) *
+      advance;
+
+    y +=
+      Math.sin(heading) *
+      advance;
+
+    const spaceId =
+      spaceIdFor(
+        familySeed,
+        maxSteps +
+          forcedStep,
+        0x39acbf,
+      );
+
+    const idSeed =
+      mix32(
+        familySeed ^
+        0x71b83d ^
+        forcedStep,
+      );
+
+    const room =
+      makePrimitive(
+        seed,
+        idSeed,
+        spaceId,
+        familySeed,
+        spacePalette(
+          seed,
+          familySeed,
+          spaceId,
+          x,
+          y,
+          commonColor,
+        ),
+        x,
+        y,
+        heading,
+        dims.w,
+        dims.h,
+        forcedStep % 3 === 2
+          ? 'merge-chamber'
+          : 'merge-room',
+        forcedStep % 3 === 2,
+      );
+
+    out.push(room);
+
+    addCompoundParts(
+      out,
+      seed,
+      room,
+      idSeed,
+      rng,
+      profile,
+    );
+
+    remaining =
+      Math.hypot(
+        target.x - x,
+        target.y - y,
+      );
+
+    forcedStep++;
+  }
+
+  const finalDistance =
+    Math.hypot(
+      target.x - x,
+      target.y - y,
+    );
+
+  if (finalDistance > 20) {
+    const angle =
+      Math.atan2(
+        target.y - y,
+        target.x - x,
+      );
+
+    const midpoint = {
+      x:
+        (x + target.x) * 0.5,
+      y:
+        (y + target.y) * 0.5,
+    };
+
+    const profile =
+      fieldProfile(
+        seed,
+        midpoint.x,
+        midpoint.y,
+      );
+
+    const spaceId =
+      spaceIdFor(
+        familySeed,
+        999,
+        0x718db1,
+      );
+
+    const width =
+      Math.max(
+        105,
+        finalDistance + 90,
+      );
+
+    const height =
+      82 +
+      profile.scale * 78;
+
+    const idSeed =
+      mix32(
+        familySeed ^
+        0x7f31a4d,
+      );
+
+    const mergeRoom =
+      makePrimitive(
+        seed,
+        idSeed,
+        spaceId,
+        familySeed,
+        spacePalette(
+          seed,
+          familySeed,
+          spaceId,
+          midpoint.x,
+          midpoint.y,
+          commonColor,
+        ),
+        midpoint.x,
+        midpoint.y,
+        angle,
+        width,
+        height,
+        'merge-chamber',
+        true,
+      );
+
+    out.push(mergeRoom);
+
+    addCompoundParts(
+      out,
+      seed,
+      mergeRoom,
+      idSeed,
+      rng,
+      profile,
+    );
   }
 
   return out;
 }
 
-function macroPrimitives(seed, mx, my) {
+function siteGrowth(
+  seed,
+  sx,
+  sy,
+) {
+  if (
+    !isAcceptedSite(
+      seed,
+      sx,
+      sy,
+    )
+  ) {
+    return [];
+  }
+
+  const source =
+    siteCandidate(
+      seed,
+      sx,
+      sy,
+    );
+
   const out = [];
-  const parent = parentFor(seed, mx, my);
+
+  const parent =
+    parentFor(
+      seed,
+      sx,
+      sy,
+    );
 
   if (parent) {
-    out.push(
-      ...edgeFabric(
+    const target =
+      siteCandidate(
         seed,
-        mx,
-        my,
         parent[0],
         parent[1],
-        4001,
+      );
+
+    const familySeed =
+      mix32(
+        hashString(
+          pairSiteKey(
+            sx,
+            sy,
+            parent[0],
+            parent[1],
+          ),
+        ) ^
+        seed ^
+        0x4fd71a,
+      );
+
+    out.push(
+      ...growFrontToTarget(
+        seed,
+        source,
+        target,
+        familySeed,
         true,
       ),
     );
   } else {
-    out.push(...rootBurst(seed));
+    const rootSeed =
+      hashInt(
+        seed,
+        sx,
+        sy,
+        9901,
+      );
+
+    const profile =
+      fieldProfile(
+        seed,
+        source.x,
+        source.y,
+      );
+
+    const commonColor =
+      familyPalette(
+        seed,
+        rootSeed,
+        source.x,
+        source.y,
+      );
+
+    const rootSpace =
+      spaceIdFor(
+        rootSeed,
+        0,
+        0x1ba4f7,
+      );
+
+    const rootRoom =
+      makePrimitive(
+        seed,
+        mix32(
+          rootSeed ^
+          0x71bd31,
+        ),
+        rootSpace,
+        rootSeed,
+        commonColor,
+        source.x,
+        source.y,
+        hashSigned(
+          seed,
+          sx,
+          sy,
+          9911,
+        ) *
+          Math.PI,
+        150 +
+          profile.scale * 120,
+        120 +
+          profile.scale * 105,
+        'root-chamber',
+        true,
+      );
+
+    out.push(rootRoom);
+
+    const rng =
+      seededRng(rootSeed);
+
+    for (
+      let branch = 0;
+      branch < 3;
+      branch++
+    ) {
+      out.push(
+        ...growFreeBranch(
+          seed,
+          {
+            x: source.x,
+            y: source.y,
+          },
+          rng() * TAU,
+          rootSeed,
+          mix32(
+            rootSeed ^
+            Math.imul(
+              branch + 1,
+              0x85ebca77,
+            ),
+          ),
+          rootSpace,
+          commonColor,
+          0,
+        ),
+      );
+    }
   }
 
   for (
     const [nx, ny] of
-    optionalLinks(seed, mx, my)
+    optionalLinks(
+      seed,
+      sx,
+      sy,
+    )
   ) {
-    out.push(
-      ...edgeFabric(
+    const target =
+      siteCandidate(
         seed,
-        mx,
-        my,
         nx,
         ny,
-        5001,
+      );
+
+    const loopSeed =
+      mix32(
+        hashString(
+          pairSiteKey(
+            sx,
+            sy,
+            nx,
+            ny,
+          ),
+        ) ^
+        seed ^
+        0x5e3ba1,
+      );
+
+    out.push(
+      ...growFrontToTarget(
+        seed,
+        source,
+        target,
+        loopSeed,
         false,
       ),
     );
+  }
+
+  return out;
+}
+
+function primitiveRadius(
+  primitive,
+) {
+  return (
+    Math.hypot(
+      primitive.w,
+      primitive.h,
+    ) *
+    0.5
+  );
+}
+
+function spatialBucketKey(
+  bx,
+  by,
+) {
+  return bx + ',' + by;
+}
+
+function buildSpatialBuckets(
+  primitives,
+  bucketSize,
+) {
+  const buckets =
+    new Map();
+
+  for (
+    let index = 0;
+    index < primitives.length;
+    index++
+  ) {
+    const primitive =
+      primitives[index];
+
+    const bx =
+      Math.floor(
+        primitive.x / bucketSize,
+      );
+
+    const by =
+      Math.floor(
+        primitive.y / bucketSize,
+      );
+
+    const key =
+      spatialBucketKey(bx, by);
+
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+    }
+
+    buckets.get(key).push(index);
+  }
+
+  return buckets;
+}
+
+function nearbyPrimitiveIndices(
+  buckets,
+  x,
+  y,
+  bucketSize,
+  radius,
+) {
+  const minBX =
+    Math.floor(
+      (x - radius) /
+        bucketSize,
+    );
+
+  const maxBX =
+    Math.floor(
+      (x + radius) /
+        bucketSize,
+    );
+
+  const minBY =
+    Math.floor(
+      (y - radius) /
+        bucketSize,
+    );
+
+  const maxBY =
+    Math.floor(
+      (y + radius) /
+        bucketSize,
+    );
+
+  const out = [];
+
+  for (
+    let by = minBY;
+    by <= maxBY;
+    by++
+  ) {
+    for (
+      let bx = minBX;
+      bx <= maxBX;
+      bx++
+    ) {
+      const values =
+        buckets.get(
+          spatialBucketKey(
+            bx,
+            by,
+          ),
+        );
+
+      if (!values) continue;
+
+      out.push(...values);
+    }
+  }
+
+  return out;
+}
+
+function mergePrimitives(
+  seed,
+  primitives,
+  bounds,
+) {
+  const bucketSize = 210;
+
+  const buckets =
+    buildSpatialBuckets(
+      primitives,
+      bucketSize,
+    );
+
+  const out = [];
+
+  const seen =
+    new Set();
+
+  const expanded = {
+    minX:
+      bounds.minX - MERGE_RADIUS,
+    maxX:
+      bounds.maxX + MERGE_RADIUS,
+    minY:
+      bounds.minY - MERGE_RADIUS,
+    maxY:
+      bounds.maxY + MERGE_RADIUS,
+  };
+
+  for (
+    let index = 0;
+    index < primitives.length;
+    index++
+  ) {
+    const a =
+      primitives[index];
+
+    if (
+      a.x < expanded.minX ||
+      a.x > expanded.maxX ||
+      a.y < expanded.minY ||
+      a.y > expanded.maxY
+    ) {
+      continue;
+    }
+
+    const nearby =
+      nearbyPrimitiveIndices(
+        buckets,
+        a.x,
+        a.y,
+        bucketSize,
+        MERGE_RADIUS,
+      );
+
+    for (const otherIndex of nearby) {
+      if (otherIndex <= index) {
+        continue;
+      }
+
+      const b =
+        primitives[otherIndex];
+
+      if (
+        a.familySeed ===
+        b.familySeed
+      ) {
+        continue;
+      }
+
+      const dx =
+        b.x - a.x;
+      const dy =
+        b.y - a.y;
+
+      const distance =
+        Math.hypot(dx, dy);
+
+      if (
+        distance >
+        MERGE_RADIUS ||
+        distance < 70
+      ) {
+        continue;
+      }
+
+      const key =
+        a.id < b.id
+          ? a.id + ':' + b.id
+          : b.id + ':' + a.id;
+
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+
+      const radiusA =
+        Math.min(
+          primitiveRadius(a),
+          Math.max(a.w, a.h) * 0.72,
+        );
+
+      const radiusB =
+        Math.min(
+          primitiveRadius(b),
+          Math.max(b.w, b.h) * 0.72,
+        );
+
+      const gap =
+        distance -
+        radiusA * 0.52 -
+        radiusB * 0.52;
+
+      if (
+        gap < -45 ||
+        gap > 115
+      ) {
+        continue;
+      }
+
+      const midpoint = {
+        x:
+          (a.x + b.x) * 0.5,
+        y:
+          (a.y + b.y) * 0.5,
+      };
+
+      const profile =
+        fieldProfile(
+          seed,
+          midpoint.x,
+          midpoint.y,
+        );
+
+      const pairSeed =
+        mix32(
+          hashString(key) ^
+          seed ^
+          0x681ac9,
+        );
+
+      const roll =
+        (pairSeed >>> 0) /
+        4294967296;
+
+      const threshold =
+        0.18 +
+        profile.density * 0.24 +
+        profile.branch * 0.12;
+
+      if (roll > threshold) {
+        continue;
+      }
+
+      const angle =
+        Math.atan2(dy, dx);
+
+      const width =
+        clamp(
+          gap + 115,
+          92,
+          205,
+        );
+
+      const height =
+        72 +
+        profile.scale * 70 +
+        (
+          mix32(
+            pairSeed ^
+            0x2da119,
+          ) %
+          42
+        );
+
+      const spaceId =
+        spaceIdFor(
+          pairSeed,
+          0,
+          0x5a32d1,
+        );
+
+      const colorIndex =
+        spacePalette(
+          seed,
+          pairSeed,
+          spaceId,
+          midpoint.x,
+          midpoint.y,
+          a.colorIndex,
+        );
+
+      out.push(
+        makePrimitive(
+          seed,
+          pairSeed,
+          spaceId,
+          pairSeed,
+          colorIndex,
+          midpoint.x,
+          midpoint.y,
+          angle,
+          width,
+          height,
+          'merge-junction',
+          true,
+        ),
+      );
+    }
+  }
+
+  return out;
+}
+
+function infillPrimitives(
+  seed,
+  primitives,
+  bounds,
+) {
+  const bucketSize = 210;
+
+  const buckets =
+    buildSpatialBuckets(
+      primitives,
+      bucketSize,
+    );
+
+  const out = [];
+
+  const minGX =
+    Math.floor(
+      (bounds.minX - 160) /
+      INFILL_GRID,
+    );
+
+  const maxGX =
+    Math.floor(
+      (bounds.maxX + 160) /
+      INFILL_GRID,
+    );
+
+  const minGY =
+    Math.floor(
+      (bounds.minY - 160) /
+      INFILL_GRID,
+    );
+
+  const maxGY =
+    Math.floor(
+      (bounds.maxY + 160) /
+      INFILL_GRID,
+    );
+
+  for (
+    let gy = minGY;
+    gy <= maxGY;
+    gy++
+  ) {
+    for (
+      let gx = minGX;
+      gx <= maxGX;
+      gx++
+    ) {
+      const x =
+        gx * INFILL_GRID +
+        INFILL_GRID * 0.5 +
+        hashSigned(
+          seed,
+          gx,
+          gy,
+          8201,
+        ) *
+          INFILL_GRID *
+          0.34;
+
+      const y =
+        gy * INFILL_GRID +
+        INFILL_GRID * 0.5 +
+        hashSigned(
+          seed,
+          gx,
+          gy,
+          8202,
+        ) *
+          INFILL_GRID *
+          0.34;
+
+      const nearbyIndices =
+        nearbyPrimitiveIndices(
+          buckets,
+          x,
+          y,
+          bucketSize,
+          245,
+        );
+
+      if (nearbyIndices.length < 3) {
+        continue;
+      }
+
+      let inside = false;
+      let nearest = null;
+      let nearestDistance =
+        Infinity;
+
+      const sectors =
+        [false, false, false, false];
+
+      const families =
+        new Set();
+
+      for (
+        const index of nearbyIndices
+      ) {
+        const primitive =
+          primitives[index];
+
+        const dx =
+          primitive.x - x;
+        const dy =
+          primitive.y - y;
+
+        const distance =
+          Math.hypot(dx, dy);
+
+        if (
+          distance <
+          nearestDistance
+        ) {
+          nearestDistance =
+            distance;
+          nearest = primitive;
+        }
+
+        if (
+          distance <
+          primitiveRadius(primitive) *
+            0.62
+        ) {
+          inside = true;
+          break;
+        }
+
+        if (distance <= 225) {
+          const angle =
+            Math.atan2(dy, dx);
+
+          let sector =
+            Math.floor(
+              (
+                angle +
+                Math.PI
+              ) /
+              (Math.PI / 2),
+            );
+
+          sector =
+            ((sector % 4) + 4) %
+            4;
+
+          sectors[sector] = true;
+          families.add(
+            primitive.familySeed,
+          );
+        }
+      }
+
+      if (
+        inside ||
+        !nearest
+      ) {
+        continue;
+      }
+
+      const sectorCount =
+        sectors.filter(Boolean)
+          .length;
+
+      if (
+        sectorCount < 3 &&
+        families.size < 3
+      ) {
+        continue;
+      }
+
+      const profile =
+        fieldProfile(
+          seed,
+          x,
+          y,
+        );
+
+      const candidateSeed =
+        hashInt(
+          seed,
+          gx,
+          gy,
+          8211,
+        );
+
+      const roll =
+        (candidateSeed >>> 0) /
+        4294967296;
+
+      const threshold =
+        0.18 +
+        profile.density * 0.26 +
+        (
+          sectorCount === 4
+            ? 0.10
+            : 0
+        );
+
+      if (roll > threshold) {
+        continue;
+      }
+
+      const bearing =
+        Math.atan2(
+          y - nearest.y,
+          x - nearest.x,
+        );
+
+      const rng =
+        seededRng(
+          candidateSeed,
+        );
+
+      const kind =
+        chooseRoomKind(
+          rng,
+          profile,
+          2,
+        );
+
+      const dims =
+        roomDimensions(
+          rng,
+          profile,
+          kind,
+        );
+
+      const overlapAdvance =
+        Math.min(
+          nearestDistance * 0.62,
+          Math.max(
+            36,
+            Math.min(
+              nearest.w,
+              nearest.h,
+            ) *
+              0.30 +
+              Math.min(
+                dims.w,
+                dims.h,
+              ) *
+                0.28,
+          ),
+        );
+
+      const center = {
+        x:
+          nearest.x +
+          Math.cos(bearing) *
+            overlapAdvance,
+        y:
+          nearest.y +
+          Math.sin(bearing) *
+            overlapAdvance,
+      };
+
+      const spaceId =
+        spaceIdFor(
+          candidateSeed,
+          0,
+          0x2b781d,
+        );
+
+      const colorIndex =
+        spacePalette(
+          seed,
+          candidateSeed,
+          spaceId,
+          center.x,
+          center.y,
+          nearest.colorIndex,
+        );
+
+      const room =
+        makePrimitive(
+          seed,
+          candidateSeed,
+          spaceId,
+          candidateSeed,
+          colorIndex,
+          center.x,
+          center.y,
+          bearing,
+          dims.w,
+          dims.h,
+          'infill-room',
+          kind === 'chamber',
+          (
+            kind === 'chamber' &&
+            rng() < 0.04
+          )
+            ? 'ellipse'
+            : 'rect',
+        );
+
+      out.push(room);
+
+      addCompoundParts(
+        out,
+        seed,
+        room,
+        candidateSeed,
+        rng,
+        profile,
+      );
+    }
   }
 
   return out;

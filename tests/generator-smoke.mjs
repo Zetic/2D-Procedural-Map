@@ -125,13 +125,31 @@ function verifyRegion(generator, bounds) {
     }
   }
 
+  const kinds = new Set();
+  let cutouts = 0;
+  let wideOpenings = 0;
+
+  for (const cell of cells) {
+    for (const room of cell.rooms) {
+      kinds.add(room.kind);
+      if ((room.cutouts || []).length) cutouts += 1;
+    }
+    for (const door of cell.doors) {
+      if (door.kind === 'opening') wideOpenings += 1;
+    }
+  }
+
   return {
     rooms: rooms.length,
+    cells: cells.length,
     corridors: corridorMap.size,
     chambers: [...corridorMap.values()].reduce(
       (total, corridor) => total + corridor.chambers.length,
       0,
     ),
+    kinds,
+    cutouts,
+    wideOpenings,
   };
 }
 
@@ -141,7 +159,17 @@ const regions = [
   { minX: 3600, maxX: 6300, minY: -2700, maxY: 0 },
 ];
 
-let totals = { rooms: 0, corridors: 0, chambers: 0 };
+assert(GENERATOR_VERSION === 4, 'Expected generator version 4');
+
+let totals = {
+  rooms: 0,
+  cells: 0,
+  corridors: 0,
+  chambers: 0,
+  cutouts: 0,
+  wideOpenings: 0,
+};
+const observedKinds = new Set();
 
 for (const seed of seeds) {
   verifyParentChains(seed);
@@ -151,8 +179,12 @@ for (const seed of seeds) {
   for (const region of regions) {
     const result = verifyRegion(generator, region);
     totals.rooms += result.rooms;
+    totals.cells += result.cells;
     totals.corridors += result.corridors;
     totals.chambers += result.chambers;
+    totals.cutouts += result.cutouts;
+    totals.wideOpenings += result.wideOpenings;
+    for (const kind of result.kinds) observedKinds.add(kind);
   }
 
   const home = { minX: -900, maxX: 900, minY: -900, maxY: 900 };
@@ -169,11 +201,26 @@ for (const seed of seeds) {
   assert(before === after, `Exploration-order determinism failed for ${seed}`);
 }
 
+const averageRoomsPerCell = totals.rooms / totals.cells;
+
+assert(
+  averageRoomsPerCell >= 12,
+  `Expected dense generation, got only ${averageRoomsPerCell.toFixed(2)} rooms/cell`,
+);
+assert(
+  observedKinds.size >= 10,
+  `Expected room-style variety, observed only ${observedKinds.size} kinds`,
+);
+assert(totals.cutouts > 0, 'Expected notched/courtyard room shapes');
+assert(totals.wideOpenings > 0, 'Expected wide compound-room openings');
+
 console.log(
   JSON.stringify({
     generatorVersion: GENERATOR_VERSION,
     seeds: seeds.length,
     regions: seeds.length * regions.length,
+    roomKinds: [...observedKinds].sort(),
+    averageRoomsPerCell: Number(averageRoomsPerCell.toFixed(2)),
     ...totals,
     status: 'ok',
   }),

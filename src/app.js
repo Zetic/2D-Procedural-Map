@@ -92,6 +92,68 @@ function drawRectWall(rect, width = 5) {
   });
 }
 
+function drawRoomCutouts(room) {
+  const cutouts = room.cutouts || [];
+  if (!cutouts.length) return;
+
+  withRectTransform(room, () => {
+    for (const cutout of cutouts) {
+      const touches =
+        cutout.touches ||
+        (cutout.side >= 0 ? [cutout.side] : []);
+
+      const left = cutout.x - cutout.w / 2;
+      const right = cutout.x + cutout.w / 2;
+      const top = cutout.y - cutout.h / 2;
+      const bottom = cutout.y + cutout.h / 2;
+      const erase = 8;
+
+      const eraseLeft = touches.includes(2) ? erase : 0;
+      const eraseRight = touches.includes(0) ? erase : 0;
+      const eraseTop = touches.includes(3) ? erase : 0;
+      const eraseBottom = touches.includes(1) ? erase : 0;
+
+      ctx.fillStyle = background;
+      ctx.fillRect(
+        left - eraseLeft,
+        top - eraseTop,
+        cutout.w + eraseLeft + eraseRight,
+        cutout.h + eraseTop + eraseBottom,
+      );
+
+      ctx.strokeStyle = wall;
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'butt';
+
+      if (!touches.length) {
+        ctx.strokeRect(left, top, cutout.w, cutout.h);
+        continue;
+      }
+
+      ctx.beginPath();
+
+      if (!touches.includes(2)) {
+        ctx.moveTo(left, top);
+        ctx.lineTo(left, bottom);
+      }
+      if (!touches.includes(0)) {
+        ctx.moveTo(right, top);
+        ctx.lineTo(right, bottom);
+      }
+      if (!touches.includes(3)) {
+        ctx.moveTo(left, top);
+        ctx.lineTo(right, top);
+      }
+      if (!touches.includes(1)) {
+        ctx.moveTo(left, bottom);
+        ctx.lineTo(right, bottom);
+      }
+
+      ctx.stroke();
+    }
+  });
+}
+
 function drawRoomDetails(room, detailLevel) {
   if (detailLevel < 2) return;
 
@@ -119,6 +181,50 @@ function drawRoomDetails(room, detailLevel) {
       ctx.stroke();
     }
 
+    if (room.kind === 'office' || room.kind === 'office-suite') {
+      const axisX = room.w >= room.h;
+      const length = axisX ? room.w : room.h;
+      const cross = axisX ? room.h : room.w;
+      const bays = Math.max(2, Math.min(6, Math.floor(length / 34)));
+
+      for (let i = 1; i < bays; i++) {
+        const t = i / bays;
+        const along = -length / 2 + length * t;
+        const halfCross = cross * 0.22;
+
+        ctx.beginPath();
+        if (axisX) {
+          ctx.moveTo(along, -halfCross);
+          ctx.lineTo(along, halfCross);
+        } else {
+          ctx.moveTo(-halfCross, along);
+          ctx.lineTo(halfCross, along);
+        }
+        ctx.stroke();
+      }
+    } else if (
+      room.kind === 'gallery' ||
+      room.kind === 'transverse-gallery' ||
+      room.kind === 'loading-hall'
+    ) {
+      const axisX = room.w >= room.h;
+      const length = axisX ? room.w : room.h;
+      const ticks = Math.max(1, Math.min(7, Math.floor(length / 48)));
+
+      for (let i = 1; i <= ticks; i++) {
+        const along = -length / 2 + (i / (ticks + 1)) * length;
+        ctx.beginPath();
+        if (axisX) {
+          ctx.moveTo(along, -4);
+          ctx.lineTo(along, 4);
+        } else {
+          ctx.moveTo(-4, along);
+          ctx.lineTo(4, along);
+        }
+        ctx.stroke();
+      }
+    }
+
     if (detailLevel >= 3) {
       ctx.fillStyle = columnFill;
       for (const column of room.columns || []) {
@@ -140,7 +246,7 @@ function drawDoor(door) {
   ctx.moveTo(door.x - dx, door.y - dy);
   ctx.lineTo(door.x + dx, door.y + dy);
   ctx.strokeStyle = door.color;
-  ctx.lineWidth = 11;
+  ctx.lineWidth = door.kind === 'opening' ? 15 : (door.kind === 'external' ? 13 : 10);
   ctx.lineCap = 'butt';
   ctx.stroke();
 }
@@ -202,6 +308,13 @@ function render() {
 
     for (const cell of cells) {
       for (const room of cell.rooms) drawRoomDetails(room, detailLevel);
+    }
+
+    // Notches and interior voids are subtracted last so they erase both the
+    // outer wall and any interior detail that would otherwise cross the void.
+    // Exterior-facing cutouts produce L/U-like room silhouettes.
+    for (const cell of cells) {
+      for (const room of cell.rooms) drawRoomCutouts(room);
     }
 
     // Internal room doors are generated from the growth adjacency graph.

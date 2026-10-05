@@ -1,9 +1,9 @@
-export const CELL_SIZE = 900;
+export const CELL_SIZE = 820;
 export const QUERY_HALO = 2;
-export const GENERATOR_VERSION = 3;
+export const GENERATOR_VERSION = 4;
 
 const TAU = Math.PI * 2;
-const MAX_COMPLEX_RADIUS = 252;
+const MAX_COMPLEX_RADIUS = 304;
 const ROUTE_STEP = 42;
 const WALL = '#665947';
 const FLOOR_PALETTES = [
@@ -92,7 +92,7 @@ function choosePalette(seed, cx, cy) {
 }
 
 function anchorFor(seed, cx, cy) {
-  const jitter = CELL_SIZE * 0.145;
+  const jitter = CELL_SIZE * 0.10;
   return {
     x: cx * CELL_SIZE + CELL_SIZE * 0.5 + hashSigned(seed, cx, cy, 11) * jitter,
     y: cy * CELL_SIZE + CELL_SIZE * 0.5 + hashSigned(seed, cx, cy, 12) * jitter,
@@ -228,34 +228,221 @@ function oppositeSide(side) {
   return (side + 2) % 4;
 }
 
-function roomDimensions(rng, attachSide, depth) {
+function complexProfile(seed, cx, cy) {
+  const roll = hash01(seed, cx, cy, 744);
+  if (roll < 0.18) {
+    return {
+      name: 'service-maze',
+      targetBase: 27,
+      targetJitter: 12,
+      branch: 0.82,
+      majorChance: 0.045,
+      openChance: 0.16,
+      cutoutChance: 0.08,
+      columnChance: 0.12,
+      partitionChance: 0.54,
+      scale: 0.82,
+    };
+  }
+  if (roll < 0.36) {
+    return {
+      name: 'galleries',
+      targetBase: 23,
+      targetJitter: 11,
+      branch: 0.74,
+      majorChance: 0.075,
+      openChance: 0.28,
+      cutoutChance: 0.10,
+      columnChance: 0.18,
+      partitionChance: 0.42,
+      scale: 1.02,
+    };
+  }
+  if (roll < 0.53) {
+    return {
+      name: 'atrium',
+      targetBase: 20,
+      targetJitter: 9,
+      branch: 0.67,
+      majorChance: 0.18,
+      openChance: 0.48,
+      cutoutChance: 0.28,
+      columnChance: 0.52,
+      partitionChance: 0.30,
+      scale: 1.08,
+    };
+  }
+  if (roll < 0.69) {
+    return {
+      name: 'office-web',
+      targetBase: 29,
+      targetJitter: 13,
+      branch: 0.86,
+      majorChance: 0.055,
+      openChance: 0.20,
+      cutoutChance: 0.06,
+      columnChance: 0.10,
+      partitionChance: 0.66,
+      scale: 0.88,
+    };
+  }
+  if (roll < 0.84) {
+    return {
+      name: 'warehouse',
+      targetBase: 19,
+      targetJitter: 9,
+      branch: 0.65,
+      majorChance: 0.22,
+      openChance: 0.42,
+      cutoutChance: 0.18,
+      columnChance: 0.72,
+      partitionChance: 0.22,
+      scale: 1.16,
+    };
+  }
+  return {
+    name: 'mixed',
+    targetBase: 24,
+    targetJitter: 12,
+    branch: 0.76,
+    majorChance: 0.11,
+    openChance: 0.31,
+    cutoutChance: 0.16,
+    columnChance: 0.34,
+    partitionChance: 0.40,
+    scale: 1.0,
+  };
+}
+
+function roomDimensions(rng, attachSide, depth, profile) {
   const roll = rng();
   let normal;
   let cross;
   let major = false;
+  let kind = 'room';
 
-  if (roll < 0.15) {
-    normal = 96 + rng() * 78;
-    cross = 26 + rng() * 24;
-  } else if (roll < 0.30) {
-    normal = 34 + rng() * 42;
-    cross = 92 + rng() * 92;
-  } else if (roll < 0.42 && depth < 4) {
-    normal = 104 + rng() * 82;
-    cross = 92 + rng() * 92;
-    major = true;
-  } else if (roll < 0.58) {
-    normal = 42 + rng() * 48;
-    cross = 38 + rng() * 56;
+  if (profile.name === 'service-maze') {
+    if (roll < 0.28) {
+      normal = 30 + rng() * 38;
+      cross = 24 + rng() * 36;
+      kind = 'cell';
+    } else if (roll < 0.52) {
+      normal = 76 + rng() * 92;
+      cross = 22 + rng() * 26;
+      kind = 'service-hall';
+    } else if (roll < 0.76) {
+      normal = 28 + rng() * 36;
+      cross = 72 + rng() * 82;
+      kind = 'cross-hall';
+    } else {
+      normal = 48 + rng() * 62;
+      cross = 40 + rng() * 58;
+      kind = 'room';
+    }
+  } else if (profile.name === 'galleries') {
+    if (roll < 0.38) {
+      normal = 118 + rng() * 112;
+      cross = 28 + rng() * 36;
+      kind = 'gallery';
+    } else if (roll < 0.62) {
+      normal = 40 + rng() * 48;
+      cross = 108 + rng() * 104;
+      kind = 'transverse-gallery';
+    } else if (roll < 0.82) {
+      normal = 72 + rng() * 78;
+      cross = 54 + rng() * 66;
+      kind = 'room';
+    } else {
+      normal = 118 + rng() * 90;
+      cross = 86 + rng() * 78;
+      major = depth < 5;
+      kind = 'hall';
+    }
+  } else if (profile.name === 'atrium') {
+    if (roll < 0.34 && depth < 5) {
+      normal = 126 + rng() * 100;
+      cross = 112 + rng() * 98;
+      major = true;
+      kind = 'atrium';
+    } else if (roll < 0.60) {
+      normal = 88 + rng() * 88;
+      cross = 42 + rng() * 54;
+      kind = 'wing';
+    } else if (roll < 0.80) {
+      normal = 44 + rng() * 54;
+      cross = 92 + rng() * 84;
+      kind = 'wing';
+    } else {
+      normal = 54 + rng() * 66;
+      cross = 48 + rng() * 62;
+      kind = 'room';
+    }
+  } else if (profile.name === 'office-web') {
+    if (roll < 0.36) {
+      normal = 34 + rng() * 42;
+      cross = 32 + rng() * 44;
+      kind = 'office';
+    } else if (roll < 0.60) {
+      normal = 72 + rng() * 86;
+      cross = 24 + rng() * 28;
+      kind = 'office-hall';
+    } else if (roll < 0.78) {
+      normal = 30 + rng() * 34;
+      cross = 74 + rng() * 84;
+      kind = 'office-hall';
+    } else {
+      normal = 62 + rng() * 72;
+      cross = 52 + rng() * 66;
+      kind = 'office-suite';
+    }
+  } else if (profile.name === 'warehouse') {
+    if (roll < 0.44 && depth < 5) {
+      normal = 144 + rng() * 112;
+      cross = 112 + rng() * 96;
+      major = true;
+      kind = 'warehouse';
+    } else if (roll < 0.70) {
+      normal = 110 + rng() * 92;
+      cross = 42 + rng() * 54;
+      kind = 'loading-hall';
+    } else {
+      normal = 72 + rng() * 82;
+      cross = 58 + rng() * 72;
+      kind = 'utility';
+    }
   } else {
-    normal = 58 + rng() * 70;
-    cross = 48 + rng() * 70;
+    if (roll < 0.18) {
+      normal = 108 + rng() * 96;
+      cross = 26 + rng() * 34;
+      kind = 'gallery';
+    } else if (roll < 0.34) {
+      normal = 34 + rng() * 44;
+      cross = 100 + rng() * 96;
+      kind = 'transverse-gallery';
+    } else if (roll < 0.48 && depth < 5) {
+      normal = 118 + rng() * 96;
+      cross = 96 + rng() * 92;
+      major = true;
+      kind = 'hall';
+    } else if (roll < 0.66) {
+      normal = 38 + rng() * 54;
+      cross = 34 + rng() * 58;
+      kind = 'cell';
+    } else {
+      normal = 62 + rng() * 82;
+      cross = 48 + rng() * 76;
+      kind = 'room';
+    }
   }
+
+  major = major || (depth < 5 && rng() < profile.majorChance);
+  normal *= profile.scale;
+  cross *= profile.scale;
 
   if (attachSide === 0 || attachSide === 2) {
-    return { w: normal, h: cross, major };
+    return { w: normal, h: cross, major, kind };
   }
-  return { w: cross, h: normal, major };
+  return { w: cross, h: normal, major, kind };
 }
 
 function withinComplexRadius(room, anchor, maxRadius = MAX_COMPLEX_RADIUS) {
@@ -273,108 +460,323 @@ function collidesWithRooms(candidate, rooms, ignoredIndex) {
   return false;
 }
 
-function addPartitions(room, rng) {
+function addRoomDetails(room, rng, profile, protectedSides = []) {
   room.partitions = [];
   room.columns = [];
+  room.cutouts = [];
+  room.blockedSides = [];
+  room.detailStyle = 'plain';
 
-  if (room.major || rng() < 0.30) {
-    const count = room.major ? 1 + Math.floor(rng() * 3) : 1;
+  const protectedSet = new Set(protectedSides);
+  const partitionChance = profile.partitionChance + (room.kind === 'office-suite' ? 0.20 : 0);
+
+  if (room.major || rng() < partitionChance) {
+    const maxCount = room.major ? 3 : (room.kind === 'office-suite' ? 2 : 1);
+    const count = 1 + Math.floor(rng() * maxCount);
     for (let i = 0; i < count; i++) {
       room.partitions.push({
         axis: rng() < 0.5 ? 'x' : 'y',
-        t: 0.22 + rng() * 0.56,
-        gap: 0.18 + rng() * 0.22,
+        t: 0.18 + rng() * 0.64,
+        gap: 0.15 + rng() * 0.24,
       });
     }
+    room.detailStyle = 'partitioned';
   }
 
-  if (room.major && rng() < 0.65) {
-    const cols = Math.max(1, Math.min(4, Math.floor(room.w / 72)));
-    const rows = Math.max(1, Math.min(4, Math.floor(room.h / 72)));
+  const columnChance = profile.columnChance + (room.kind === 'warehouse' || room.kind === 'atrium' ? 0.18 : 0);
+  if ((room.major || room.w * room.h > 12000) && rng() < columnChance) {
+    const cols = Math.max(1, Math.min(5, Math.floor(room.w / 64)));
+    const rows = Math.max(1, Math.min(5, Math.floor(room.h / 64)));
     for (let y = 1; y <= rows; y++) {
       for (let x = 1; x <= cols; x++) {
         if (rng() < 0.72) {
           room.columns.push({
             u: x / (cols + 1),
             v: y / (rows + 1),
-            r: 2.4 + rng() * 2.8,
+            r: 2.4 + rng() * 3.2,
           });
         }
       }
     }
+    room.detailStyle = room.detailStyle === 'plain' ? 'columns' : room.detailStyle;
+  }
+
+  const canCut =
+    room.w > 90 &&
+    room.h > 78 &&
+    rng() < Math.min(0.55, profile.cutoutChance * 1.4);
+
+  if (canCut) {
+    const availableSides = [0, 1, 2, 3].filter((side) => !protectedSet.has(side));
+
+    if (availableSides.length) {
+      const primary = availableSides[Math.floor(rng() * availableSides.length)];
+      const adjacent = [
+        (primary + 1) % 4,
+        (primary + 3) % 4,
+      ].filter((side) => availableSides.includes(side));
+
+      const makeCorner = adjacent.length > 0 && rng() < 0.42;
+
+      if (makeCorner) {
+        const secondary = adjacent[Math.floor(rng() * adjacent.length)];
+        const touches = [primary, secondary];
+        const cutout = {
+          side: primary,
+          touches,
+          x: 0,
+          y: 0,
+          w: room.w * (0.22 + rng() * 0.18),
+          h: room.h * (0.22 + rng() * 0.18),
+        };
+
+        if (touches.includes(0)) {
+          cutout.x = room.w * 0.5 - cutout.w * 0.5;
+        } else if (touches.includes(2)) {
+          cutout.x = -room.w * 0.5 + cutout.w * 0.5;
+        }
+
+        if (touches.includes(1)) {
+          cutout.y = room.h * 0.5 - cutout.h * 0.5;
+        } else if (touches.includes(3)) {
+          cutout.y = -room.h * 0.5 + cutout.h * 0.5;
+        }
+
+        room.cutouts.push(cutout);
+        for (const side of touches) {
+          if (!room.blockedSides.includes(side)) room.blockedSides.push(side);
+        }
+        room.detailStyle = 'corner-notched';
+      } else {
+        const side = primary;
+        const depthFrac = 0.18 + rng() * 0.24;
+        const spanFrac = 0.26 + rng() * 0.34;
+        const cutout = {
+          side,
+          touches: [side],
+          x: 0,
+          y: 0,
+          w: side === 0 || side === 2 ? room.w * depthFrac : room.w * spanFrac,
+          h: side === 1 || side === 3 ? room.h * depthFrac : room.h * spanFrac,
+        };
+
+        if (side === 0) {
+          cutout.x = room.w * 0.5 - cutout.w * 0.5;
+          cutout.y = (rng() - 0.5) * Math.max(0, room.h - cutout.h) * 0.72;
+        } else if (side === 2) {
+          cutout.x = -room.w * 0.5 + cutout.w * 0.5;
+          cutout.y = (rng() - 0.5) * Math.max(0, room.h - cutout.h) * 0.72;
+        } else if (side === 1) {
+          cutout.y = room.h * 0.5 - cutout.h * 0.5;
+          cutout.x = (rng() - 0.5) * Math.max(0, room.w - cutout.w) * 0.72;
+        } else {
+          cutout.y = -room.h * 0.5 + cutout.h * 0.5;
+          cutout.x = (rng() - 0.5) * Math.max(0, room.w - cutout.w) * 0.72;
+        }
+
+        room.cutouts.push(cutout);
+        room.blockedSides.push(side);
+        room.detailStyle = 'notched';
+      }
+    }
+  }
+
+  if (!room.cutouts.length && room.major && room.w > 130 && room.h > 110 && rng() < 0.16) {
+    room.cutouts.push({
+      side: -1,
+      x: (rng() - 0.5) * room.w * 0.10,
+      y: (rng() - 0.5) * room.h * 0.10,
+      w: room.w * (0.18 + rng() * 0.16),
+      h: room.h * (0.18 + rng() * 0.16),
+    });
+    room.detailStyle = 'courtyard';
   }
 }
 
 function createComplex(seed, cx, cy) {
   const anchor = anchorFor(seed, cx, cy);
   const color = choosePalette(seed, cx, cy);
-  const density = 0.72 + hash01(seed, cx, cy, 801) * 0.56;
+  const profile = complexProfile(seed, cx, cy);
+  const density = 0.82 + hash01(seed, cx, cy, 801) * 0.64;
   const rng = seededRng(hashInt(seed, cx, cy, 9001));
   const orientationStep = Math.PI / 12;
   const angle = Math.round((rng() * TAU) / orientationStep) * orientationStep;
+
+  let rootW = 118 + rng() * 84;
+  let rootH = 92 + rng() * 74;
+  let rootKind = 'hub';
+
+  if (profile.name === 'service-maze') {
+    rootW = 92 + rng() * 58;
+    rootH = 76 + rng() * 50;
+    rootKind = 'service-hub';
+  } else if (profile.name === 'galleries') {
+    rootW = 154 + rng() * 94;
+    rootH = 62 + rng() * 54;
+    rootKind = 'gallery-hub';
+  } else if (profile.name === 'atrium') {
+    rootW = 150 + rng() * 100;
+    rootH = 126 + rng() * 88;
+    rootKind = 'atrium';
+  } else if (profile.name === 'office-web') {
+    rootW = 106 + rng() * 66;
+    rootH = 88 + rng() * 58;
+    rootKind = 'office-hub';
+  } else if (profile.name === 'warehouse') {
+    rootW = 172 + rng() * 96;
+    rootH = 136 + rng() * 88;
+    rootKind = 'warehouse';
+  }
 
   const root = {
     id: cx + ':' + cy + ':0',
     x: anchor.x,
     y: anchor.y,
-    w: 112 + rng() * 86,
-    h: 86 + rng() * 72,
+    w: rootW,
+    h: rootH,
     angle,
     color,
     major: true,
+    kind: rootKind,
   };
-  addPartitions(root, rng);
+  addRoomDetails(root, rng, profile, []);
 
   const rooms = [root];
   const doors = [];
   const usedSides = new Set();
   const frontier = [];
-  for (let side = 0; side < 4; side++) frontier.push({ roomIndex: 0, side, depth: 0 });
 
-  const targetRooms = 10 + Math.floor(rng() * 8 + density * 5);
+  for (let side = 0; side < 4; side++) {
+    if (!root.blockedSides.includes(side)) frontier.push({ roomIndex: 0, side, depth: 0, boost: 1.2 });
+  }
+
+  const targetRooms =
+    profile.targetBase +
+    Math.floor(rng() * profile.targetJitter) +
+    Math.floor((density - 0.82) * 8);
+
   let attempts = 0;
+  const maxAttempts = targetRooms * 24;
 
-  while (rooms.length < targetRooms && frontier.length && attempts < targetRooms * 14) {
+  while (rooms.length < targetRooms && frontier.length && attempts < maxAttempts) {
     attempts++;
-    const pickIndex = Math.floor(rng() * frontier.length);
+
+    let pickIndex;
+    if (rng() < 0.46) {
+      let bestScore = -Infinity;
+      pickIndex = 0;
+      for (let i = 0; i < frontier.length; i++) {
+        const front = frontier[i];
+        const score =
+          (front.boost || 1) * (0.65 + rng() * 0.7) -
+          front.depth * 0.018;
+        if (score > bestScore) {
+          bestScore = score;
+          pickIndex = i;
+        }
+      }
+    } else {
+      pickIndex = Math.floor(rng() * frontier.length);
+    }
+
     const front = frontier.splice(pickIndex, 1)[0];
     const sideKey = front.roomIndex + ':' + front.side;
     if (usedSides.has(sideKey)) continue;
 
     const parent = rooms[front.roomIndex];
+    if (parent.blockedSides.includes(front.side)) continue;
+
     const parentSide = sideInfo(parent, front.side);
-    const dims = roomDimensions(rng, front.side, front.depth);
-    const child = {
-      id: cx + ':' + cy + ':' + rooms.length,
-      x: 0,
-      y: 0,
-      w: dims.w,
-      h: dims.h,
-      angle,
-      color,
-      major: dims.major,
-    };
+    const incomingSide = oppositeSide(front.side);
 
-    const childNormalHalf = (front.side === 0 || front.side === 2) ? child.w * 0.5 : child.h * 0.5;
-    const childCrossHalf = (front.side === 0 || front.side === 2) ? child.h * 0.5 : child.w * 0.5;
-    const offsetLimit = Math.max(0, Math.min(parentSide.halfTangent, childCrossHalf) * 0.38 - 7);
-    const lateral = hashSigned(seed, cx * 997 + rooms.length, cy * 991 + front.roomIndex, front.side + 410) * offsetLimit;
+    let child = null;
+    let childCrossHalf = 0;
+    let lateral = 0;
 
-    child.x = parentSide.x + parentSide.normal.x * childNormalHalf + parentSide.tangent.x * lateral;
-    child.y = parentSide.y + parentSide.normal.y * childNormalHalf + parentSide.tangent.y * lateral;
+    // Dense architectural packing requires more than one proposal per wall.
+    // If a large room cannot fit, progressively smaller/shifted candidates are
+    // tried before the frontier is abandoned.
+    for (let placementTry = 0; placementTry < 5; placementTry++) {
+      const dims = roomDimensions(rng, front.side, front.depth, profile);
+      const shrink = 1 - placementTry * 0.085;
+      const candidate = {
+        id: cx + ':' + cy + ':' + rooms.length,
+        x: 0,
+        y: 0,
+        w: Math.max(24, dims.w * shrink),
+        h: Math.max(22, dims.h * shrink),
+        angle,
+        color,
+        major: dims.major && placementTry < 3,
+        kind: dims.kind,
+      };
 
-    if (!withinComplexRadius(child, anchor)) continue;
-    if (collidesWithRooms(child, rooms, front.roomIndex)) continue;
+      const childNormalHalf =
+        (front.side === 0 || front.side === 2)
+          ? candidate.w * 0.5
+          : candidate.h * 0.5;
+      const candidateCrossHalf =
+        (front.side === 0 || front.side === 2)
+          ? candidate.h * 0.5
+          : candidate.w * 0.5;
+      const overlapLimit = Math.min(parentSide.halfTangent, candidateCrossHalf);
+      const offsetLimit = Math.max(0, overlapLimit * 0.72 - 7);
 
-    addPartitions(child, rng);
+      const signedOffset = hashSigned(
+        seed,
+        cx * 997 + rooms.length + placementTry * 37,
+        cy * 991 + front.roomIndex,
+        front.side + 410 + placementTry * 19,
+      );
+
+      const offsetScale =
+        placementTry === 0 ? 0.86 :
+        placementTry === 1 ? 0.46 :
+        placementTry === 2 ? 0 :
+        placementTry === 3 ? 0.68 : 0.28;
+
+      const candidateLateral = signedOffset * offsetLimit * offsetScale;
+
+      candidate.x =
+        parentSide.x +
+        parentSide.normal.x * childNormalHalf +
+        parentSide.tangent.x * candidateLateral;
+      candidate.y =
+        parentSide.y +
+        parentSide.normal.y * childNormalHalf +
+        parentSide.tangent.y * candidateLateral;
+
+      if (!withinComplexRadius(candidate, anchor)) continue;
+      if (collidesWithRooms(candidate, rooms, front.roomIndex)) continue;
+
+      child = candidate;
+      childCrossHalf = candidateCrossHalf;
+      lateral = candidateLateral;
+      break;
+    }
+
+    if (!child) continue;
+
+    addRoomDetails(child, rng, profile, [incomingSide]);
+
     const childIndex = rooms.length;
     rooms.push(child);
 
     usedSides.add(sideKey);
-    usedSides.add(childIndex + ':' + oppositeSide(front.side));
+    usedSides.add(childIndex + ':' + incomingSide);
 
     const overlapHalf = Math.min(parentSide.halfTangent, childCrossHalf);
-    const doorWidth = Math.max(12, Math.min(36, overlapHalf * 0.80));
+    const fullOverlap = overlapHalf * 2;
+    const openingBias =
+      profile.openChance +
+      (parent.major || child.major ? 0.14 : 0) +
+      (parent.kind === 'gallery' || child.kind === 'gallery' ? 0.06 : 0);
+    const wideOpening = rng() < Math.min(0.82, openingBias);
+
+    const doorWidth = wideOpening
+      ? Math.max(24, Math.min(118, fullOverlap * (0.56 + rng() * 0.28)))
+      : Math.max(11, Math.min(42, fullOverlap * (0.26 + rng() * 0.18)));
+
     const doorX = parentSide.x + parentSide.tangent.x * lateral;
     const doorY = parentSide.y + parentSide.tangent.y * lateral;
     doors.push({
@@ -383,17 +785,66 @@ function createComplex(seed, cx, cy) {
       angle: Math.atan2(parentSide.tangent.y, parentSide.tangent.x),
       width: doorWidth,
       color,
-      kind: 'internal',
+      kind: wideOpening ? 'opening' : 'internal',
     });
 
-    const branchSides = [0, 1, 2, 3].filter((side) => side !== oppositeSide(front.side));
+    const branchSides = [0, 1, 2, 3].filter(
+      (side) =>
+        side !== incomingSide &&
+        !child.blockedSides.includes(side),
+    );
+
     for (const side of branchSides) {
-      const branchChance = side === front.side ? 0.92 : 0.58 + density * 0.10;
-      if (rng() < branchChance) frontier.push({ roomIndex: childIndex, side, depth: front.depth + 1 });
+      const forward = side === front.side;
+      const branchChance = Math.min(
+        0.96,
+        profile.branch * (forward ? 1.10 : 0.78) +
+          (child.major ? 0.05 : 0) +
+          (wideOpening ? 0.04 : 0),
+      );
+
+      if (rng() < branchChance) {
+        frontier.push({
+          roomIndex: childIndex,
+          side,
+          depth: front.depth + 1,
+          boost: forward ? 1.25 : (wideOpening ? 1.12 : 1),
+        });
+      }
     }
 
-    if (rng() < 0.16 && !usedSides.has(front.roomIndex + ':' + ((front.side + 1) % 4))) {
-      frontier.push({ roomIndex: front.roomIndex, side: (front.side + 1) % 4, depth: front.depth + 1 });
+    if (wideOpening && rng() < 0.58) {
+      const sideA = (front.side + 1) % 4;
+      const sideB = (front.side + 3) % 4;
+      for (const side of [sideA, sideB]) {
+        if (
+          side !== incomingSide &&
+          !child.blockedSides.includes(side) &&
+          !usedSides.has(childIndex + ':' + side)
+        ) {
+          frontier.push({
+            roomIndex: childIndex,
+            side,
+            depth: front.depth + 1,
+            boost: 1.38,
+          });
+        }
+      }
+    }
+
+    if (rng() < 0.22) {
+      const parentSideCandidate = (front.side + (rng() < 0.5 ? 1 : 3)) % 4;
+      if (
+        !parent.blockedSides.includes(parentSideCandidate) &&
+        !usedSides.has(front.roomIndex + ':' + parentSideCandidate)
+      ) {
+        frontier.push({
+          roomIndex: front.roomIndex,
+          side: parentSideCandidate,
+          depth: front.depth + 1,
+          boost: 1.08,
+        });
+      }
     }
   }
 
@@ -410,6 +861,7 @@ function createComplex(seed, cx, cy) {
     anchor,
     color,
     angle,
+    profile: profile.name,
     rooms,
     doors,
     usedSides,
@@ -429,6 +881,7 @@ function externalPortalCandidates(complex, target, salt) {
     const room = complex.rooms[roomIndex];
     for (let side = 0; side < 4; side++) {
       if (complex.usedSides.has(roomIndex + ':' + side)) continue;
+      if (room.blockedSides && room.blockedSides.includes(side)) continue;
       const info = sideInfo(room, side);
       const facing = info.normal.x * tx + info.normal.y * ty;
       if (facing < 0.12) continue;
@@ -458,9 +911,42 @@ function externalPortalCandidates(complex, target, salt) {
 
   if (candidates.length) return candidates;
 
-  const room = complex.rooms[0];
+  // Relax only the facing requirement before ever reusing an occupied wall.
   const fallback = [];
+  for (let roomIndex = 0; roomIndex < complex.rooms.length; roomIndex++) {
+    const room = complex.rooms[roomIndex];
+    for (let side = 0; side < 4; side++) {
+      if (complex.usedSides.has(roomIndex + ':' + side)) continue;
+      if (room.blockedSides && room.blockedSides.includes(side)) continue;
+      const info = sideInfo(room, side);
+      const facing = info.normal.x * tx + info.normal.y * ty;
+      const projection =
+        (info.x - complex.anchor.x) * tx +
+        (info.y - complex.anchor.y) * ty;
+      fallback.push({
+        score: projection + facing * 70,
+        x: info.x,
+        y: info.y,
+        normal: info.normal,
+        tangent: info.tangent,
+        roomIndex,
+        side,
+        width: Math.max(14, Math.min(30, info.halfTangent * 0.58)),
+        color: complex.color,
+      });
+    }
+  }
+
+  if (fallback.length) {
+    fallback.sort((a, b) => b.score - a.score);
+    return fallback;
+  }
+
+  // Extremely saturated complexes may have every exterior side already used.
+  // Reuse the best unblocked root side as a last-resort deterministic portal.
+  const room = complex.rooms[0];
   for (let side = 0; side < 4; side++) {
+    if (room.blockedSides && room.blockedSides.includes(side)) continue;
     const info = sideInfo(room, side);
     const facing = info.normal.x * tx + info.normal.y * ty;
     fallback.push({
@@ -475,6 +961,7 @@ function externalPortalCandidates(complex, target, salt) {
       color: complex.color,
     });
   }
+
   fallback.sort((a, b) => b.score - a.score);
   return fallback;
 }

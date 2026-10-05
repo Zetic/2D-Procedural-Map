@@ -1030,30 +1030,68 @@ function neckClear(complex, portal, outside, width) {
   return true;
 }
 
-function clearPortalOptions(complex, target, salt, width, maxOptions = 6) {
+function clearPortalOptions(
+  complex,
+  target,
+  salt,
+  width,
+  maxOptions = 6,
+  globalObstacles = null,
+) {
   const candidates = externalPortalCandidates(complex, target, salt);
   const clearance = width * 0.5 + 8;
   const options = [];
 
   for (const portal of candidates) {
     const localOutside = pointOutsideRoom(complex, portal, clearance);
-    const runway = 62 + hash01(salt, portal.roomIndex, portal.side, 1181) * 42;
+    const runway =
+      62 +
+      hash01(
+        salt,
+        portal.roomIndex,
+        portal.side,
+        1181,
+      ) *
+        42;
+
     const probe = {
       x: localOutside.x + portal.normal.x * runway,
       y: localOutside.y + portal.normal.y * runway,
     };
 
-    if (neckClear(complex, portal, probe, width)) {
-      options.push({ portal, outside: localOutside });
-      if (options.length >= maxOptions) break;
+    if (!neckClear(complex, portal, probe, width)) continue;
+
+    // The route begins at the end of this short runway. Validate the runway
+    // against all nearby room obstacles so it cannot overshoot into another
+    // complex before pathfinding even starts.
+    if (
+      globalObstacles &&
+      !segmentClear(localOutside, probe, globalObstacles)
+    ) {
+      continue;
     }
+
+    options.push({
+      portal,
+      localOutside,
+      outside: probe,
+    });
+
+    if (options.length >= maxOptions) break;
   }
 
   if (!options.length && candidates.length) {
     const portal = candidates[0];
+    const localOutside = pointOutsideRoom(
+      complex,
+      portal,
+      clearance,
+    );
+
     options.push({
       portal,
-      outside: pointOutsideRoom(complex, portal, clearance),
+      localOutside,
+      outside: localOutside,
     });
   }
 
@@ -1061,7 +1099,14 @@ function clearPortalOptions(complex, target, salt, width, maxOptions = 6) {
 }
 
 function chooseClearPortal(complex, target, salt, width) {
-  return clearPortalOptions(complex, target, salt, width, 1)[0];
+  return clearPortalOptions(
+    complex,
+    target,
+    salt,
+    width,
+    1,
+    null,
+  )[0];
 }
 
 function segmentCircleDistanceSq(ax, ay, bx, by, cx, cy) {
@@ -2110,14 +2155,16 @@ export class InfiniteMapGenerator {
       target.anchor,
       routeSeed ^ 0x1122,
       width,
-      6,
+      12,
+      obstacles,
     );
     const targetOptions = clearPortalOptions(
       target,
       source.anchor,
       routeSeed ^ 0x3344,
       width,
-      6,
+      12,
+      obstacles,
     );
 
     const combinations = [];

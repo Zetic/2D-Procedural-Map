@@ -990,14 +990,10 @@ function externalPortalCandidates(complex, target, salt) {
   return fallback;
 }
 
-function pointOutsideComplex(complex, portal, clearance) {
-  const vx = portal.x - complex.anchor.x;
-  const vy = portal.y - complex.anchor.y;
-  const targetRadius = complex.radius + clearance;
-  const b = vx * portal.normal.x + vy * portal.normal.y;
-  const c = vx * vx + vy * vy - targetRadius * targetRadius;
-  const disc = Math.max(0, b * b - c);
-  const t = Math.max(8, -b + Math.sqrt(disc) + 4);
+function pointOutsidePortal(portal, clearance) {
+  // Leave the selected wall by only a short architectural neck. Routing no
+  // longer jumps to the outside of a giant district-radius obstacle.
+  const t = Math.max(10, clearance + 6);
   return {
     x: portal.x + portal.normal.x * t,
     y: portal.y + portal.normal.y * t,
@@ -1027,17 +1023,17 @@ function neckClear(complex, portal, outside, width) {
 
 function chooseClearPortal(complex, target, salt, width) {
   const candidates = externalPortalCandidates(complex, target, salt);
-  const clearance = width * 0.5 + 15;
+  const clearance = width * 0.5 + 8;
 
   for (const portal of candidates) {
-    const outside = pointOutsideComplex(complex, portal, clearance);
+    const outside = pointOutsidePortal(portal, clearance);
     if (neckClear(complex, portal, outside, width)) return { portal, outside };
   }
 
   const portal = candidates[0];
   return {
     portal,
-    outside: pointOutsideComplex(complex, portal, clearance),
+    outside: pointOutsidePortal(portal, clearance),
   };
 }
 

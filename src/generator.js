@@ -1059,6 +1059,72 @@ function segmentPolygonHits(a, b, room) {
   return hits;
 }
 
+export function roomsOverlap(roomA, roomB) {
+  if (
+    !aabbIntersects(
+      roomA.aabb,
+      roomB.aabb,
+    )
+  ) {
+    return false;
+  }
+
+  for (
+    let i = 0;
+    i < roomA.vertices.length;
+    i++
+  ) {
+    const a1 = roomA.vertices[i];
+    const a2 =
+      roomA.vertices[
+        (i + 1) %
+          roomA.vertices.length
+      ];
+
+    for (
+      let j = 0;
+      j < roomB.vertices.length;
+      j++
+    ) {
+      const b1 = roomB.vertices[j];
+      const b2 =
+        roomB.vertices[
+          (j + 1) %
+            roomB.vertices.length
+        ];
+
+      const hit =
+        segmentIntersection(
+          a1,
+          a2,
+          b1,
+          b2,
+        );
+
+      if (
+        hit &&
+        hit.t > 1e-6 &&
+        hit.t < 1 - 1e-6 &&
+        hit.u > 1e-6 &&
+        hit.u < 1 - 1e-6
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return (
+    pointInPolygon(
+      roomA.vertices[0],
+      roomB.vertices,
+    ) ||
+    pointInPolygon(
+      roomB.vertices[0],
+      roomA.vertices,
+    )
+  );
+}
+
 function cloneRoom(room) {
   return {
     ...room,
@@ -1837,6 +1903,8 @@ function connectionBetween(
       id: key + ':connector:' + index,
       edgeKey: key,
       primary,
+      fromRoomId: left.id,
+      toRoomId: right.id,
       points,
       width,
       color:

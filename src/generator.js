@@ -501,38 +501,83 @@ function addRoomDetails(room, rng, profile, protectedSides = []) {
     room.detailStyle = room.detailStyle === 'plain' ? 'columns' : room.detailStyle;
   }
 
-  const canCut = room.w > 100 && room.h > 88 && rng() < profile.cutoutChance;
+  const canCut =
+    room.w > 90 &&
+    room.h > 78 &&
+    rng() < Math.min(0.55, profile.cutoutChance * 1.4);
+
   if (canCut) {
     const availableSides = [0, 1, 2, 3].filter((side) => !protectedSet.has(side));
+
     if (availableSides.length) {
-      const side = availableSides[Math.floor(rng() * availableSides.length)];
-      const depthFrac = 0.18 + rng() * 0.24;
-      const spanFrac = 0.26 + rng() * 0.34;
-      const cutout = {
-        side,
-        x: 0,
-        y: 0,
-        w: side === 0 || side === 2 ? room.w * depthFrac : room.w * spanFrac,
-        h: side === 1 || side === 3 ? room.h * depthFrac : room.h * spanFrac,
-      };
+      const primary = availableSides[Math.floor(rng() * availableSides.length)];
+      const adjacent = [
+        (primary + 1) % 4,
+        (primary + 3) % 4,
+      ].filter((side) => availableSides.includes(side));
 
-      if (side === 0) {
-        cutout.x = room.w * 0.5 - cutout.w * 0.5;
-        cutout.y = (rng() - 0.5) * Math.max(0, room.h - cutout.h) * 0.52;
-      } else if (side === 2) {
-        cutout.x = -room.w * 0.5 + cutout.w * 0.5;
-        cutout.y = (rng() - 0.5) * Math.max(0, room.h - cutout.h) * 0.52;
-      } else if (side === 1) {
-        cutout.y = room.h * 0.5 - cutout.h * 0.5;
-        cutout.x = (rng() - 0.5) * Math.max(0, room.w - cutout.w) * 0.52;
+      const makeCorner = adjacent.length > 0 && rng() < 0.42;
+
+      if (makeCorner) {
+        const secondary = adjacent[Math.floor(rng() * adjacent.length)];
+        const touches = [primary, secondary];
+        const cutout = {
+          side: primary,
+          touches,
+          x: 0,
+          y: 0,
+          w: room.w * (0.22 + rng() * 0.18),
+          h: room.h * (0.22 + rng() * 0.18),
+        };
+
+        if (touches.includes(0)) {
+          cutout.x = room.w * 0.5 - cutout.w * 0.5;
+        } else if (touches.includes(2)) {
+          cutout.x = -room.w * 0.5 + cutout.w * 0.5;
+        }
+
+        if (touches.includes(1)) {
+          cutout.y = room.h * 0.5 - cutout.h * 0.5;
+        } else if (touches.includes(3)) {
+          cutout.y = -room.h * 0.5 + cutout.h * 0.5;
+        }
+
+        room.cutouts.push(cutout);
+        for (const side of touches) {
+          if (!room.blockedSides.includes(side)) room.blockedSides.push(side);
+        }
+        room.detailStyle = 'corner-notched';
       } else {
-        cutout.y = -room.h * 0.5 + cutout.h * 0.5;
-        cutout.x = (rng() - 0.5) * Math.max(0, room.w - cutout.w) * 0.52;
-      }
+        const side = primary;
+        const depthFrac = 0.18 + rng() * 0.24;
+        const spanFrac = 0.26 + rng() * 0.34;
+        const cutout = {
+          side,
+          touches: [side],
+          x: 0,
+          y: 0,
+          w: side === 0 || side === 2 ? room.w * depthFrac : room.w * spanFrac,
+          h: side === 1 || side === 3 ? room.h * depthFrac : room.h * spanFrac,
+        };
 
-      room.cutouts.push(cutout);
-      room.blockedSides.push(side);
-      room.detailStyle = 'notched';
+        if (side === 0) {
+          cutout.x = room.w * 0.5 - cutout.w * 0.5;
+          cutout.y = (rng() - 0.5) * Math.max(0, room.h - cutout.h) * 0.72;
+        } else if (side === 2) {
+          cutout.x = -room.w * 0.5 + cutout.w * 0.5;
+          cutout.y = (rng() - 0.5) * Math.max(0, room.h - cutout.h) * 0.72;
+        } else if (side === 1) {
+          cutout.y = room.h * 0.5 - cutout.h * 0.5;
+          cutout.x = (rng() - 0.5) * Math.max(0, room.w - cutout.w) * 0.72;
+        } else {
+          cutout.y = -room.h * 0.5 + cutout.h * 0.5;
+          cutout.x = (rng() - 0.5) * Math.max(0, room.w - cutout.w) * 0.72;
+        }
+
+        room.cutouts.push(cutout);
+        room.blockedSides.push(side);
+        room.detailStyle = 'notched';
+      }
     }
   }
 

@@ -4,7 +4,9 @@ import {
   GENERATOR_VERSION,
   InfiniteMapGenerator,
   MACRO_SIZE,
+  isSiteCell,
   parentCell,
+  sitePosition,
 } from '../src/generator.js';
 
 function assert(condition, message) {
@@ -63,68 +65,144 @@ function snapshot(chunks) {
   );
 }
 
-function verifyParentTree(seed) {
-  for (let my = -18; my <= 18; my += 2) {
-    for (let mx = -18; mx <= 18; mx += 2) {
-      let x = mx;
-      let y = my;
-      let guard = 0;
+function rootDistanceSq(seed, sx, sy) {
+  const root = sitePosition(seed, 0, 0);
+  const point = sitePosition(seed, sx, sy);
 
-      while (x !== 0 || y !== 0) {
-        const before =
-          Math.abs(x) + Math.abs(y);
+  const dx = point.x - root.x;
+  const dy = point.y - root.y;
 
-        const parent =
-          parentCell(seed, x, y);
+  return dx * dx + dy * dy;
+}
 
-        assert(
-          parent,
-          `Missing parent for ${seed} at ${x},${y}`,
-        );
+function verifySiteField(seed) {
+  const sites = [];
 
-        const after =
-          Math.abs(parent[0]) +
-          Math.abs(parent[1]);
+  for (let sy = -14; sy <= 14; sy++) {
+    for (let sx = -14; sx <= 14; sx++) {
+      if (!isSiteCell(seed, sx, sy)) continue;
 
-        assert(
-          after < before,
-          `Parent did not reduce rank for ${seed} at ${x},${y}`,
-        );
+      const point = sitePosition(seed, sx, sy);
 
-        [x, y] = parent;
+      sites.push({
+        sx,
+        sy,
+        x: point.x,
+        y: point.y,
+      });
 
-        guard += 1;
+      if (sx === 0 && sy === 0) continue;
 
-        assert(
-          guard < 500,
-          `Parent chain guard exceeded for ${seed}`,
-        );
-      }
+      const parent = parentCell(seed, sx, sy);
+
+      assert(
+        parent,
+        `Missing parent for accepted site ${sx},${sy}`,
+      );
+
+      assert(
+        isSiteCell(seed, parent[0], parent[1]),
+        `Parent is not an accepted site for ${sx},${sy}`,
+      );
+
+      const before = rootDistanceSq(seed, sx, sy);
+      const after = rootDistanceSq(
+        seed,
+        parent[0],
+        parent[1],
+      );
+
+      assert(
+        after < before,
+        `Parent did not reduce root distance for ${sx},${sy}`,
+      );
     }
   }
+
+  let minimumDistance = Infinity;
+
+  for (let i = 0; i < sites.length; i++) {
+    for (let j = i + 1; j < sites.length; j++) {
+      minimumDistance = Math.min(
+        minimumDistance,
+        Math.hypot(
+          sites[i].x - sites[j].x,
+          sites[i].y - sites[j].y,
+        ),
+      );
+    }
+  }
+
+  assert(
+    minimumDistance >= 494,
+    `Growth sites violate hard-core spacing: ${minimumDistance.toFixed(2)}`,
+  );
+
+  const bucketSize = 1000;
+  const buckets = new Map();
+
+  let minBX = Infinity;
+  let maxBX = -Infinity;
+  let minBY = Infinity;
+  let maxBY = -Infinity;
+
+  for (const site of sites) {
+    const bx = Math.floor(site.x / bucketSize);
+    const by = Math.floor(site.y / bucketSize);
+    const key = `${bx},${by}`;
+
+    minBX = Math.min(minBX, bx);
+    maxBX = Math.max(maxBX, bx);
+    minBY = Math.min(minBY, by);
+    maxBY = Math.max(maxBY, by);
+
+    buckets.set(
+      key,
+      (buckets.get(key) || 0) + 1,
+    );
+  }
+
+  const counts = [];
+
+  for (let by = minBY; by <= maxBY; by++) {
+    for (let bx = minBX; bx <= maxBX; bx++) {
+      counts.push(
+        buckets.get(`${bx},${by}`) || 0,
+      );
+    }
+  }
+
+  assert(
+    new Set(counts).size >= 3,
+    'Expected irregular growth-site density across world buckets',
+  );
+
+  assert(
+    counts.some((count) => count === 0),
+    'Expected some world buckets to contain no growth source',
+  );
+
+  assert(
+    counts.some((count) => count >= 2),
+    'Expected some world buckets to contain multiple growth sources',
+  );
+
+  return {
+    sites: sites.length,
+    minimumDistance,
+  };
 }
 
 function rasterizeCore(chunks, bounds) {
-  const minGX =
-    Math.floor(bounds.minX / FABRIC_CELL);
+  const minGX = Math.floor(bounds.minX / FABRIC_CELL);
+  const maxGX = Math.ceil(bounds.maxX / FABRIC_CELL) - 1;
+  const minGY = Math.floor(bounds.minY / FABRIC_CELL);
+  const maxGY = Math.ceil(bounds.maxY / FABRIC_CELL) - 1;
 
-  const maxGX =
-    Math.ceil(bounds.maxX / FABRIC_CELL) - 1;
+  const width = maxGX - minGX + 1;
+  const height = maxGY - minGY + 1;
 
-  const minGY =
-    Math.floor(bounds.minY / FABRIC_CELL);
-
-  const maxGY =
-    Math.ceil(bounds.maxY / FABRIC_CELL) - 1;
-
-  const width =
-    maxGX - minGX + 1;
-
-  const height =
-    maxGY - minGY + 1;
-
-  const occupied =
-    new Uint8Array(width * height);
+  const occupied = new Uint8Array(width * height);
 
   for (const chunk of chunks) {
     for (const rect of chunk.floors) {
@@ -132,41 +210,23 @@ function rasterizeCore(chunks, bounds) {
         minGX,
         Math.floor(rect.x / FABRIC_CELL),
       );
-
       const endX = Math.min(
         maxGX,
-        Math.ceil(
-          (rect.x + rect.w) /
-            FABRIC_CELL,
-        ) - 1,
+        Math.ceil((rect.x + rect.w) / FABRIC_CELL) - 1,
       );
-
       const startY = Math.max(
         minGY,
         Math.floor(rect.y / FABRIC_CELL),
       );
-
       const endY = Math.min(
         maxGY,
-        Math.ceil(
-          (rect.y + rect.h) /
-            FABRIC_CELL,
-        ) - 1,
+        Math.ceil((rect.y + rect.h) / FABRIC_CELL) - 1,
       );
 
-      for (
-        let gy = startY;
-        gy <= endY;
-        gy++
-      ) {
-        for (
-          let gx = startX;
-          gx <= endX;
-          gx++
-        ) {
+      for (let gy = startY; gy <= endY; gy++) {
+        for (let gx = startX; gx <= endX; gx++) {
           occupied[
-            (gy - minGY) *
-              width +
+            (gy - minGY) * width +
             (gx - minGX)
           ] = 1;
         }
@@ -181,28 +241,15 @@ function rasterizeCore(chunks, bounds) {
   };
 }
 
-function connectedMassStats(
-  chunks,
-  bounds,
-) {
+function connectedMassStats(chunks, bounds) {
   const {
     occupied,
     width,
     height,
-  } = rasterizeCore(
-    chunks,
-    bounds,
-  );
+  } = rasterizeCore(chunks, bounds);
 
-  const seen =
-    new Uint8Array(
-      occupied.length,
-    );
-
-  const queue =
-    new Int32Array(
-      occupied.length,
-    );
+  const seen = new Uint8Array(occupied.length);
+  const queue = new Int32Array(occupied.length);
 
   let occupiedCount = 0;
 
@@ -213,17 +260,8 @@ function connectedMassStats(
   let components = 0;
   let largest = 0;
 
-  for (
-    let index = 0;
-    index < occupied.length;
-    index++
-  ) {
-    if (
-      !occupied[index] ||
-      seen[index]
-    ) {
-      continue;
-    }
+  for (let index = 0; index < occupied.length; index++) {
+    if (!occupied[index] || seen[index]) continue;
 
     components += 1;
 
@@ -235,74 +273,46 @@ function connectedMassStats(
     seen[index] = 1;
 
     while (head < tail) {
-      const current =
-        queue[head++];
-
+      const current = queue[head++];
       count += 1;
 
-      const x =
-        current % width;
-
-      const y =
-        Math.floor(
-          current / width,
-        );
+      const x = current % width;
+      const y = Math.floor(current / width);
 
       if (x > 0) {
-        const next =
-          current - 1;
-
-        if (
-          occupied[next] &&
-          !seen[next]
-        ) {
+        const next = current - 1;
+        if (occupied[next] && !seen[next]) {
           seen[next] = 1;
           queue[tail++] = next;
         }
       }
 
       if (x < width - 1) {
-        const next =
-          current + 1;
-
-        if (
-          occupied[next] &&
-          !seen[next]
-        ) {
+        const next = current + 1;
+        if (occupied[next] && !seen[next]) {
           seen[next] = 1;
           queue[tail++] = next;
         }
       }
 
       if (y > 0) {
-        const next =
-          current - width;
-
-        if (
-          occupied[next] &&
-          !seen[next]
-        ) {
+        const next = current - width;
+        if (occupied[next] && !seen[next]) {
           seen[next] = 1;
           queue[tail++] = next;
         }
       }
 
       if (y < height - 1) {
-        const next =
-          current + width;
-
-        if (
-          occupied[next] &&
-          !seen[next]
-        ) {
+        const next = current + width;
+        if (occupied[next] && !seen[next]) {
           seen[next] = 1;
           queue[tail++] = next;
         }
       }
     }
 
-    largest =
-      Math.max(largest, count);
+    largest = Math.max(largest, count);
   }
 
   return {
@@ -320,22 +330,10 @@ function contourStats(chunks) {
   let diagonalSegments = 0;
 
   for (const chunk of chunks) {
-    for (
-      const path of
-      chunk.exteriorPaths
-    ) {
-      for (
-        let i = 0;
-        i < path.length - 1;
-        i++
-      ) {
-        const dx =
-          path[i + 1].x -
-          path[i].x;
-
-        const dy =
-          path[i + 1].y -
-          path[i].y;
+    for (const path of chunk.exteriorPaths) {
+      for (let i = 0; i < path.length - 1; i++) {
+        const dx = path[i + 1].x - path[i].x;
+        const dy = path[i + 1].y - path[i].y;
 
         segments += 1;
 
@@ -359,51 +357,38 @@ function contourStats(chunks) {
 }
 
 function verifyFabric(seed) {
-  const generator =
-    new InfiniteMapGenerator(seed);
+  const generator = new InfiniteMapGenerator(seed);
 
   const bounds = {
-    minX: -1440,
-    maxX: 1440,
-    minY: -1080,
-    maxY: 1080,
+    minX: -1350,
+    maxX: 1350,
+    minY: -900,
+    maxY: 900,
   };
 
-  const chunks =
-    generator.query(bounds);
+  const chunks = generator.query(bounds);
 
-  assert(
-    chunks.length > 0,
-    'Expected generated chunks',
-  );
+  assert(chunks.length > 0, 'Expected generated chunks');
 
   for (const chunk of chunks) {
     assert(
       !('corridors' in chunk),
-      'v8 must not expose connector geometry',
+      'v9 must not expose corridor/connector geometry',
     );
-
     assert(
       !('rooms' in chunk),
-      'v8 must not expose source-owned room complexes',
+      'v9 must not expose source-owned room complexes',
     );
-
     assert(
       !('doors' in chunk),
-      'v8 must not expose a separate door layer',
+      'v9 must not expose a separate connector door layer',
     );
-
     assert(
-      Array.isArray(
-        chunk.exteriorPaths,
-      ),
+      Array.isArray(chunk.exteriorPaths),
       'Expected simplified exterior contour paths',
     );
-
     assert(
-      Array.isArray(
-        chunk.interiorWalls,
-      ),
+      Array.isArray(chunk.interiorWalls),
       'Expected architectural interior walls',
     );
   }
@@ -411,91 +396,69 @@ function verifyFabric(seed) {
   const densities = chunks.map(
     (chunk) =>
       chunk.occupiedCount /
-      Math.max(
-        1,
-        chunk.cellCount,
-      ),
+      Math.max(1, chunk.cellCount),
   );
 
   const averageDensity =
-    densities.reduce(
-      (a, b) => a + b,
-      0,
-    ) /
+    densities.reduce((a, b) => a + b, 0) /
     densities.length;
 
-  const variance =
+  const densityVariance =
     densities.reduce(
       (sum, value) =>
         sum +
-        (
-          value -
-          averageDensity
-        ) *
-          (
-            value -
-            averageDensity
-          ),
+        (value - averageDensity) *
+          (value - averageDensity),
       0,
-    ) /
-    densities.length;
+    ) / densities.length;
 
   const densityDeviation =
-    Math.sqrt(variance);
+    Math.sqrt(densityVariance);
 
   assert(
-    averageDensity >= 0.25 &&
-      averageDensity <= 0.75,
+    averageDensity >= 0.35 &&
+      averageDensity <= 0.78,
     `Unexpected architectural density ${averageDensity.toFixed(3)}`,
   );
 
   assert(
-    densityDeviation >= 0.08,
-    `Expected macro density variation, got deviation ${densityDeviation.toFixed(3)}`,
+    densityDeviation >= 0.07,
+    `Expected multi-scale density variation, got ${densityDeviation.toFixed(3)}`,
   );
 
   const connected =
-    connectedMassStats(
-      chunks,
-      bounds,
-    );
+    connectedMassStats(chunks, bounds);
 
   assert(
-    connected.largestFraction >= 0.95,
-    `Expected one dominant continuous architectural mass, got ${(connected.largestFraction * 100).toFixed(1)}%`,
+    connected.largestFraction >= 0.96,
+    `Expected one dominant continuous architectural fabric, got ${(connected.largestFraction * 100).toFixed(1)}%`,
   );
 
-  const contour =
-    contourStats(chunks);
+  const contour = contourStats(chunks);
 
   assert(
-    contour.diagonalFraction >= 0.06,
-    `Expected simplified non-stair-step contours, got only ${(contour.diagonalFraction * 100).toFixed(1)}% diagonal exterior segments`,
+    contour.diagonalFraction >= 0.07,
+    `Expected non-grid exterior contours, got only ${(contour.diagonalFraction * 100).toFixed(1)}% diagonal segments`,
   );
 
-  const spaceCount =
-    chunks.reduce(
-      (sum, chunk) =>
-        sum + chunk.spaceCount,
-      0,
-    );
+  const spaces = chunks.reduce(
+    (sum, chunk) => sum + chunk.spaceCount,
+    0,
+  );
 
-  const interiorWallCount =
-    chunks.reduce(
-      (sum, chunk) =>
-        sum +
-        chunk.interiorWalls.length,
-      0,
-    );
-
-  assert(
-    spaceCount >= 100,
-    `Expected many readable architectural spaces, got ${spaceCount}`,
+  const interiorWalls = chunks.reduce(
+    (sum, chunk) => sum + chunk.interiorWalls.length,
+    0,
   );
 
   assert(
-    interiorWallCount >= 300,
-    `Expected substantial room subdivision, got ${interiorWallCount} interior wall segments`,
+    spaces >= 350,
+    `Expected many readable architectural spaces, got ${spaces}`,
+  );
+
+  assert(
+    interiorWalls >= 1800,
+    `Expected substantial internal room topology, got ${interiorWalls} wall segments`,
   );
 
   const colors = new Set();
@@ -508,36 +471,54 @@ function verifyFabric(seed) {
 
   assert(
     colors.size >= 2,
-    'Expected more than one architectural floor tone',
+    'Expected multiple stable architectural floor tones',
   );
 
-  const before = snapshot(
-    generator.query({
-      minX: -900,
-      maxX: 900,
-      minY: -720,
-      maxY: 720,
-    }),
+  // Batch shape must not affect geometry.
+  const home = {
+    minX: -800,
+    maxX: 800,
+    minY: -600,
+    maxY: 600,
+  };
+
+  const standalone = snapshot(
+    new InfiniteMapGenerator(seed).query(home),
   );
 
-  generator.query({
-    minX: 16000,
-    maxX: 18000,
-    minY: -12000,
-    maxY: -10000,
+  const batchedGenerator = new InfiniteMapGenerator(seed);
+
+  batchedGenerator.query({
+    minX: -5000,
+    maxX: 5000,
+    minY: -3500,
+    maxY: 3500,
   });
 
-  const after = snapshot(
-    generator.query({
-      minX: -900,
-      maxX: 900,
-      minY: -720,
-      maxY: 720,
-    }),
+  const batched = snapshot(
+    batchedGenerator.query(home),
   );
 
   assert(
-    before === after,
+    standalone === batched,
+    `Batch-size determinism failed for ${seed}`,
+  );
+
+  const remoteGenerator = new InfiniteMapGenerator(seed);
+
+  remoteGenerator.query({
+    minX: 12000,
+    maxX: 14500,
+    minY: -11000,
+    maxY: -8500,
+  });
+
+  const remoteThenHome = snapshot(
+    remoteGenerator.query(home),
+  );
+
+  assert(
+    standalone === remoteThenHome,
     `Exploration-order determinism failed for ${seed}`,
   );
 
@@ -545,41 +526,28 @@ function verifyFabric(seed) {
     chunks: chunks.length,
     averageDensity,
     densityDeviation,
-    largestFraction:
-      connected.largestFraction,
-    components:
-      connected.components,
-    spaceCount,
-    interiorWallCount,
-    diagonalContourFraction:
-      contour.diagonalFraction,
-    floors: chunks.reduce(
-      (sum, chunk) =>
-        sum + chunk.floors.length,
-      0,
-    ),
-    details: chunks.reduce(
-      (sum, chunk) =>
-        sum + chunk.details.length,
-      0,
-    ),
+    largestFraction: connected.largestFraction,
+    components: connected.components,
+    spaces,
+    interiorWalls,
+    diagonalContourFraction: contour.diagonalFraction,
     colors: colors.size,
   };
 }
 
 assert(
-  GENERATOR_VERSION === 8,
-  'Expected generator version 8',
+  GENERATOR_VERSION === 9,
+  'Expected generator version 9',
 );
 
 assert(
   FABRIC_CHUNK % FABRIC_CELL === 0,
-  'Fabric chunk must align to raster cell size',
+  'Fabric chunk must align to occupancy cell size',
 );
 
 assert(
-  MACRO_SIZE > FABRIC_CHUNK,
-  'Macro topology must remain independent from streaming chunks',
+  MACRO_SIZE !== FABRIC_CHUNK,
+  'Growth-site indexing and streaming chunks must remain independent',
 );
 
 const seeds = [
@@ -591,46 +559,44 @@ const seeds = [
 const results = [];
 
 for (const seed of seeds) {
-  verifyParentTree(seed);
+  const siteField = verifySiteField(seed);
+  const fabric = verifyFabric(seed);
 
   results.push({
     seed,
-    ...verifyFabric(seed),
+    ...siteField,
+    ...fabric,
   });
 }
 
 console.log(
   JSON.stringify({
-    generatorVersion:
-      GENERATOR_VERSION,
+    generatorVersion: GENERATOR_VERSION,
     seeds: results.length,
-    results: results.map(
-      (result) => ({
-        seed: result.seed,
-        chunks: result.chunks,
-        averageDensity: Number(
-          result.averageDensity.toFixed(3),
-        ),
-        densityDeviation: Number(
-          result.densityDeviation.toFixed(3),
-        ),
-        largestContinuousMass: Number(
-          result.largestFraction.toFixed(4),
-        ),
-        componentsInCrop:
-          result.components,
-        spaces:
-          result.spaceCount,
-        interiorWallSegments:
-          result.interiorWallCount,
-        diagonalContourFraction: Number(
-          result.diagonalContourFraction.toFixed(3),
-        ),
-        floors: result.floors,
-        details: result.details,
-        colors: result.colors,
-      }),
-    ),
+    results: results.map((result) => ({
+      seed: result.seed,
+      growthSites: result.sites,
+      minimumSiteDistance: Number(
+        result.minimumDistance.toFixed(2),
+      ),
+      chunks: result.chunks,
+      averageDensity: Number(
+        result.averageDensity.toFixed(3),
+      ),
+      densityDeviation: Number(
+        result.densityDeviation.toFixed(3),
+      ),
+      largestContinuousMass: Number(
+        result.largestFraction.toFixed(4),
+      ),
+      componentsInCrop: result.components,
+      spaces: result.spaces,
+      interiorWallSegments: result.interiorWalls,
+      diagonalContourFraction: Number(
+        result.diagonalContourFraction.toFixed(3),
+      ),
+      colors: result.colors,
+    })),
     status: 'ok',
   }),
 );

@@ -114,3 +114,23 @@ npm test
 ## GitHub Pages
 
 `.github/workflows/pages.yml` runs the generator smoke suite before deploying `main`.
+
+
+## Current v6 validation snapshot
+
+The current smoke suite samples three seeds across six large regions and checks the grid-independent field directly.
+
+- 342 accepted irregular growth sites
+- 3,400 local rooms
+- 359 required/optional growth connections
+- 2,352 connection-fabric rooms
+- 1,294 fabric openings/doors
+- 9.94 local rooms per accepted site on average
+- 6.55 fabric rooms per connection on average
+- maximum sampled uninterrupted spine segment: 83.97 world units
+- zero local room-room overlaps
+- zero growth-spine intersections through local rooms
+- zero connection-fabric room overlaps through local rooms
+- accepted sites stay at least 500 world units apart
+- query-sized world buckets include both zero-site and multi-site cases
+- exploration-order determinism passes exact re-query comparison

@@ -2505,11 +2505,13 @@ function mergePrimitives(
       const angle =
         Math.atan2(dy, dx);
 
+      // Local merge chambers physically contain the centerline between
+      // both growth events, guaranteeing that a merge can only add connected
+      // architecture rather than a detached decoration.
       const width =
-        clamp(
-          gap + 115,
-          92,
-          205,
+        Math.min(
+          330,
+          distance + 54,
         );
 
       const height =

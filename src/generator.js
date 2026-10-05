@@ -1037,27 +1037,23 @@ function chooseClearPortal(complex, target, salt, width) {
   for (const portal of candidates) {
     const localOutside = pointOutsideRoom(complex, portal, clearance);
     const runway = 62 + hash01(salt, portal.roomIndex, portal.side, 1181) * 42;
-    const outside = {
+    const probe = {
       x: localOutside.x + portal.normal.x * runway,
       y: localOutside.y + portal.normal.y * runway,
     };
 
-    // Require an actual outward approach lane, not merely a clear doorway.
-    // This prevents a selected portal from being boxed in behind another room
-    // and forcing the macro connection to fall back to a straight cut-through.
-    if (neckClear(complex, portal, outside, width)) {
-      return { portal, outside };
+    // The longer probe must be clear, but the actual route begins immediately
+    // outside the room. This avoids overshooting narrow gaps when two dense
+    // complexes already nearly touch.
+    if (neckClear(complex, portal, probe, width)) {
+      return { portal, outside: localOutside };
     }
   }
 
   const portal = candidates[0];
-  const localOutside = pointOutsideRoom(complex, portal, clearance);
   return {
     portal,
-    outside: {
-      x: localOutside.x + portal.normal.x * 84,
-      y: localOutside.y + portal.normal.y * 84,
-    },
+    outside: pointOutsideRoom(complex, portal, clearance),
   };
 }
 

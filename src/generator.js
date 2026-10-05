@@ -101,21 +101,48 @@ function fieldProfile(seed, x, y) {
 }
 
 function familyPalette(seed, familySeed, x, y) {
-  const rare =
-    ((mix32(familySeed ^ seed ^ 0x4d23b11) >>> 0) / 4294967296);
+  const regional =
+    valueNoise(seed, x, y, 1900, 3103) * 0.62 +
+    ((mix32(familySeed ^ 0x65b43e1) >>> 0) / 4294967296) * 0.38;
 
-  if (rare < 0.085) {
-    return 5 + (
-      mix32(familySeed ^ 0x91ac771) %
-      (FLOOR_PALETTES.length - 5)
+  return Math.min(4, Math.floor(regional * 5));
+}
+
+function spacePalette(seed, familySeed, spaceId, x, y, commonColor) {
+  // Rare colors belong to compact spatial regions, not whole hidden edges.
+  // This prevents a pink/blue/green section from revealing connectivity.
+  const rareField = valueNoise(seed, x, y, 1250, 3114);
+
+  if (rareField > 0.82) {
+    const rareBand = valueNoise(seed, x, y, 2100, 3115);
+    const rareIndex =
+      5 +
+      Math.min(
+        FLOOR_PALETTES.length - 6,
+        Math.floor(
+          rareBand *
+            (FLOOR_PALETTES.length - 5),
+        ),
+      );
+
+    return rareIndex;
+  }
+
+  // Occasional cream-family variation follows spaces rather than raster rows.
+  const variation =
+    ((mix32(spaceId ^ familySeed ^ 0x4ca91d) >>> 0) / 4294967296);
+
+  if (variation < 0.14) {
+    return Math.min(
+      4,
+      Math.max(
+        0,
+        commonColor + (variation < 0.07 ? -1 : 1),
+      ),
     );
   }
 
-  const regional =
-    valueNoise(seed, x, y, 1900, 3103) * 0.56 +
-    ((mix32(familySeed ^ 0x65b43e1) >>> 0) / 4294967296) * 0.44;
-
-  return Math.min(4, Math.floor(regional * 5));
+  return commonColor;
 }
 
 function nonZeroId(value) {
@@ -480,12 +507,24 @@ function branchRooms(
         ? 'ellipse'
         : 'rect';
 
+    const roomColor =
+      i === 0
+        ? colorIndex
+        : spacePalette(
+            seed,
+            familySeed,
+            spaceId,
+            x,
+            y,
+            colorIndex,
+          );
+
     const room = makePrimitive(
       seed,
       idSeed,
       spaceId,
       familySeed,
-      colorIndex,
+      roomColor,
       x,
       y,
       angle,
@@ -669,12 +708,21 @@ function edgeFabric(
         ? 'ellipse'
         : 'rect';
 
+    const roomColor = spacePalette(
+      seed,
+      familySeed,
+      spaceId,
+      point.x,
+      point.y,
+      colorIndex,
+    );
+
     const room = makePrimitive(
       seed,
       idSeed,
       spaceId,
       familySeed,
-      colorIndex,
+      roomColor,
       point.x,
       point.y,
       point.angle,
@@ -774,19 +822,37 @@ function edgeFabric(
           0x7da4f9,
         );
 
+        const annexX =
+          point.x +
+          Math.cos(annexAngle) *
+            distance;
+
+        const annexY =
+          point.y +
+          Math.sin(annexAngle) *
+            distance;
+
+        const annexColor =
+          spacePalette(
+            seed,
+            familySeed,
+            annexSpace,
+            annexX,
+            annexY,
+            colorIndex,
+          );
+
         out.push(
           makePrimitive(
             seed,
             annexId,
             annexSpace,
             familySeed,
-            colorIndex,
-            point.x +
+            annexColor,
+            annexX,
               Math.cos(annexAngle) *
                 distance,
-            point.y +
-              Math.sin(annexAngle) *
-                distance,
+            annexY,
             point.angle,
             aw,
             ah,

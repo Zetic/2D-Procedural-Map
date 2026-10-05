@@ -1397,7 +1397,113 @@ function fallbackRoute(start, goal, obstacles, routeSeed) {
     if (pathClear(path, obstacles)) return path;
   }
 
-  return [start, goal];
+  return null;
+}
+
+function pathIntersectionCount(path, obstacles) {
+  let count = 0;
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+
+    for (const obstacle of obstacles) {
+      if (
+        segmentCircleDistanceSq(
+          a.x,
+          a.y,
+          b.x,
+          b.y,
+          obstacle.x,
+          obstacle.y,
+        ) < obstacle.r * obstacle.r
+      ) {
+        count++;
+      }
+    }
+  }
+
+  return count;
+}
+
+function firstPathIntersection(path, obstacles) {
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+
+    for (let obstacleIndex = 0; obstacleIndex < obstacles.length; obstacleIndex++) {
+      const obstacle = obstacles[obstacleIndex];
+      if (
+        segmentCircleDistanceSq(
+          a.x,
+          a.y,
+          b.x,
+          b.y,
+          obstacle.x,
+          obstacle.y,
+        ) < obstacle.r * obstacle.r
+      ) {
+        return { segmentIndex: i, obstacleIndex, obstacle };
+      }
+    }
+  }
+
+  return null;
+}
+
+function detourAroundObstacles(start, goal, obstacles, routeSeed) {
+  let path = [start, goal];
+
+  for (let iteration = 0; iteration < 72; iteration++) {
+    const hit = firstPathIntersection(path, obstacles);
+    if (!hit) return simplifyPath(path);
+
+    const a = path[hit.segmentIndex];
+    const b = path[hit.segmentIndex + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const px = -uy;
+    const py = ux;
+    const clearance = hit.obstacle.r + ROUTE_STEP * 0.82;
+    const tangentReach = clearance * 0.92;
+
+    const candidates = [];
+    for (const side of [-1, 1]) {
+      const before = {
+        x: hit.obstacle.x - ux * tangentReach + px * clearance * side,
+        y: hit.obstacle.y - uy * tangentReach + py * clearance * side,
+      };
+      const after = {
+        x: hit.obstacle.x + ux * tangentReach + px * clearance * side,
+        y: hit.obstacle.y + uy * tangentReach + py * clearance * side,
+      };
+
+      const candidate = [
+        ...path.slice(0, hit.segmentIndex + 1),
+        before,
+        after,
+        ...path.slice(hit.segmentIndex + 1),
+      ];
+
+      candidates.push({
+        path: candidate,
+        score: pathIntersectionCount(candidate, obstacles),
+        tie: hashInt(routeSeed, iteration, hit.obstacleIndex, side < 0 ? 1701 : 1702),
+      });
+    }
+
+    candidates.sort((left, right) => {
+      if (left.score !== right.score) return left.score - right.score;
+      return left.tie - right.tie;
+    });
+
+    path = candidates[0].path;
+  }
+
+  return pathClear(path, obstacles) ? simplifyPath(path) : null;
 }
 
 function chamberClear(chamber, obstacles, corridorWidth) {

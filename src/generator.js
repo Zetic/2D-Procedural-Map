@@ -1600,6 +1600,583 @@ function attachedRoomCandidates(
   return candidates;
 }
 
+function makeClusterChildRoom(
+  seed,
+  rootRoom,
+  parentRoom,
+  branchIndex,
+  depth,
+  attempt,
+  heading,
+) {
+  const sx = rootRoom.sx;
+  const sy = rootRoom.sy;
+
+  const salt =
+    5400 +
+    branchIndex * 97 +
+    depth * 13 +
+    attempt;
+
+  const rng = seededRng(
+    hashInt(
+      seed,
+      sx * 31 + branchIndex,
+      sy * 37 + depth,
+      salt,
+    ),
+  );
+
+  const profile = worldProfile(
+    seed,
+    parentRoom.x,
+    parentRoom.y,
+  );
+
+  const kindRoll = rng();
+
+  const kind =
+    kindRoll < 0.16
+      ? 'cluster-gallery'
+      : kindRoll < 0.36
+        ? 'cluster-cell'
+        : kindRoll < 0.61
+          ? 'cluster-suite'
+          : kindRoll < 0.84
+            ? 'cluster-room'
+            : 'cluster-chamber';
+
+  let w;
+  let h;
+
+  if (kind === 'cluster-gallery') {
+    w = 72 + rng() * 78;
+    h = 34 + rng() * 32;
+  } else if (kind === 'cluster-cell') {
+    w = 38 + rng() * 42;
+    h = 34 + rng() * 38;
+  } else if (kind === 'cluster-chamber') {
+    w = 82 + rng() * 78;
+    h = 68 + rng() * 72;
+  } else if (kind === 'cluster-suite') {
+    w = 58 + rng() * 68;
+    h = 50 + rng() * 60;
+  } else {
+    w = 48 + rng() * 64;
+    h = 44 + rng() * 56;
+  }
+
+  const maxRadius =
+    54 +
+    profile.scale * 18;
+
+  let radius =
+    Math.hypot(w, h) * 0.5;
+
+  if (radius > maxRadius) {
+    const scale =
+      maxRadius / radius;
+
+    w *= scale;
+    h *= scale;
+    radius = maxRadius;
+  }
+
+  const turn =
+    hashSigned(
+      seed,
+      sx * 101 + branchIndex,
+      sy * 103 + depth,
+      5411 + attempt,
+    ) *
+    (
+      0.18 +
+      depth * 0.075
+    );
+
+  const direction =
+    heading + turn;
+
+  const angle =
+    Math.round(
+      (
+        direction +
+        hashSigned(
+          seed,
+          sx,
+          sy,
+          5421 +
+            branchIndex * 17 +
+            depth * 3 +
+            attempt,
+        ) *
+          0.22
+      ) /
+        (Math.PI / 12),
+    ) *
+    (Math.PI / 12);
+
+  const shapeRoll = rng();
+
+  const shape =
+    kind === 'cluster-chamber' &&
+    shapeRoll < 0.22
+      ? 'chamfer'
+      : shapeRoll < 0.14
+        ? 'l'
+        : shapeRoll < 0.26
+          ? 'step'
+          : 'rect';
+
+  const variant =
+    hashInt(
+      seed,
+      sx + branchIndex,
+      sy + depth,
+      5431 + attempt,
+    ) % 16;
+
+  const localVertices =
+    localShapeVertices(
+      shape,
+      w,
+      h,
+      variant,
+    );
+
+  const sourcePortal =
+    rayToRoomBoundary(
+      parentRoom,
+      direction,
+    );
+
+  if (!sourcePortal) {
+    return null;
+  }
+
+  const provisional = {
+    x: 0,
+    y: 0,
+    radius,
+    vertices:
+      transformVertices(
+        localVertices,
+        0,
+        0,
+        angle,
+      ),
+  };
+
+  const reversePortal =
+    rayToRoomBoundary(
+      provisional,
+      direction + Math.PI,
+    );
+
+  if (!reversePortal) {
+    return null;
+  }
+
+  const parentExtent =
+    Math.hypot(
+      sourcePortal.x -
+        parentRoom.x,
+      sourcePortal.y -
+        parentRoom.y,
+    );
+
+  const childExtent =
+    Math.hypot(
+      reversePortal.x,
+      reversePortal.y,
+    );
+
+  const gap =
+    5 + rng() * 13;
+
+  const centerDistance =
+    parentExtent +
+    childExtent +
+    gap;
+
+  const x =
+    parentRoom.x +
+    Math.cos(direction) *
+      centerDistance;
+
+  const y =
+    parentRoom.y +
+    Math.sin(direction) *
+      centerDistance;
+
+  const vertices =
+    transformVertices(
+      localVertices,
+      x,
+      y,
+      angle,
+    );
+
+  const colorIndex =
+    hash01(
+      seed,
+      sx * 43 + branchIndex,
+      sy * 47 + depth,
+      5441 + attempt,
+    ) < 0.90
+      ? rootRoom.colorIndex
+      : clamp(
+          rootRoom.colorIndex +
+            (
+              hash01(
+                seed,
+                sx,
+                sy,
+                5449 + branchIndex + depth,
+              ) < 0.5
+                ? -1
+                : 1
+            ),
+          0,
+          4,
+        );
+
+  return {
+    id:
+      'cluster:' +
+      sx +
+      ',' +
+      sy +
+      ':' +
+      branchIndex +
+      ':' +
+      depth,
+    source: 'cluster',
+    rootSiteKey:
+      siteKey(sx, sy),
+    parentRoomId:
+      parentRoom.id,
+    priority:
+      hashInt(
+        seed,
+        sx * 59 + branchIndex,
+        sy * 61 + depth,
+        5451,
+      ),
+    x,
+    y,
+    w,
+    h,
+    radius,
+    angle,
+    kind,
+    major:
+      kind === 'cluster-chamber',
+    shape,
+    variant,
+    vertices,
+    aabb:
+      polygonAabb(vertices),
+    color:
+      FLOOR_PALETTES[
+        colorIndex
+      ],
+    colorIndex,
+    wallColor:
+      WALL_COLOR,
+    doors: [],
+    details: [],
+    heading: direction,
+  };
+}
+
+function buildLocalClusters(
+  seed,
+  siteRooms,
+) {
+  const occupied = [
+    ...siteRooms,
+  ];
+
+  const clusterRooms = [];
+  const localLinks = [];
+  const clusterBySite =
+    new Map();
+
+  for (const room of siteRooms) {
+    clusterBySite.set(
+      siteKey(room.sx, room.sy),
+      [room],
+    );
+  }
+
+  const orderedRoots =
+    siteRooms
+      .slice()
+      .sort((a, b) => {
+        const ap =
+          hashInt(
+            seed,
+            a.sx,
+            a.sy,
+            5461,
+          );
+
+        const bp =
+          hashInt(
+            seed,
+            b.sx,
+            b.sy,
+            5461,
+          );
+
+        if (ap !== bp) {
+          return ap - bp;
+        }
+
+        if (a.sy !== b.sy) {
+          return a.sy - b.sy;
+        }
+
+        return a.sx - b.sx;
+      });
+
+  for (const root of orderedRoots) {
+    const profile =
+      worldProfile(
+        seed,
+        root.x,
+        root.y,
+      );
+
+    const baseAngle =
+      valueNoise(
+        seed,
+        root.x,
+        root.y,
+        1200,
+        5471,
+      ) *
+        TAU +
+      hashSigned(
+        seed,
+        root.sx,
+        root.sy,
+        5472,
+      ) *
+        0.65;
+
+    let branchCount =
+      2 +
+      (
+        hash01(
+          seed,
+          root.sx,
+          root.sy,
+          5473,
+        ) <
+        0.34 +
+          profile.density * 0.34
+          ? 1
+          : 0
+      );
+
+    if (
+      root.major &&
+      hash01(
+        seed,
+        root.sx,
+        root.sy,
+        5474,
+      ) < 0.44
+    ) {
+      branchCount += 1;
+    }
+
+    branchCount =
+      Math.min(
+        branchCount,
+        4,
+      );
+
+    for (
+      let branchIndex = 0;
+      branchIndex < branchCount;
+      branchIndex++
+    ) {
+      let parent = root;
+
+      const spread =
+        TAU /
+        branchCount;
+
+      let heading =
+        baseAngle +
+        branchIndex * spread +
+        hashSigned(
+          seed,
+          root.sx * 71 + branchIndex,
+          root.sy * 73 - branchIndex,
+          5481,
+        ) *
+          0.42;
+
+      const depthCount =
+        1 +
+        (
+          hash01(
+            seed,
+            root.sx * 79 + branchIndex,
+            root.sy * 83,
+            5482,
+          ) <
+          0.48 +
+            profile.density * 0.30
+            ? 1
+            : 0
+        ) +
+        (
+          hash01(
+            seed,
+            root.sx,
+            root.sy + branchIndex,
+            5483,
+          ) <
+          0.08 +
+            profile.density * 0.12
+            ? 1
+            : 0
+        );
+
+      for (
+        let depth = 0;
+        depth < depthCount;
+        depth++
+      ) {
+        let accepted = null;
+
+        for (
+          let attempt = 0;
+          attempt < 3;
+          attempt++
+        ) {
+          const candidate =
+            makeClusterChildRoom(
+              seed,
+              root,
+              parent,
+              branchIndex,
+              depth,
+              attempt,
+              heading +
+                (
+                  attempt === 0
+                    ? 0
+                    : (
+                        attempt === 1
+                          ? 0.46
+                          : -0.46
+                      )
+                ),
+            );
+
+          if (
+            candidate &&
+            roomCircleClear(
+              candidate,
+              occupied,
+              new Set([
+                parent.id,
+              ]),
+            )
+          ) {
+            accepted =
+              candidate;
+            break;
+          }
+        }
+
+        if (!accepted) {
+          break;
+        }
+
+        clusterRooms.push(
+          accepted,
+        );
+
+        occupied.push(
+          accepted,
+        );
+
+        localLinks.push({
+          fromRoomId:
+            parent.id,
+          toRoomId:
+            accepted.id,
+          key:
+            'local:' +
+            accepted.id,
+        });
+
+        clusterBySite.get(
+          siteKey(
+            root.sx,
+            root.sy,
+          ),
+        ).push(accepted);
+
+        parent = accepted;
+        heading =
+          accepted.heading;
+      }
+    }
+  }
+
+  return {
+    rooms: clusterRooms,
+    links: localLinks,
+    clusterBySite,
+  };
+}
+
+function closestClusterPair(
+  clusterA,
+  clusterB,
+) {
+  let best = null;
+
+  for (const roomA of clusterA) {
+    for (const roomB of clusterB) {
+      const distance =
+        Math.hypot(
+          roomB.x - roomA.x,
+          roomB.y - roomA.y,
+        );
+
+      const score =
+        distance -
+        (
+          roomA.radius +
+          roomB.radius
+        ) *
+          0.62;
+
+      if (
+        !best ||
+        score < best.score
+      ) {
+        best = {
+          roomA,
+          roomB,
+          score,
+        };
+      }
+    }
+  }
+
+  return best;
+}
+
 function makeTransitionRoom(
   seed,
   key,
@@ -2237,30 +2814,20 @@ export class InfiniteMapGenerator {
       ...siteRoomMap.values(),
     ];
 
-    const attachedRooms = [];
-    const occupiedForAttached = [
-      ...siteRooms,
-    ];
-
-    for (
-      const candidate of
-      attachedRoomCandidates(
+    const localClusters =
+      buildLocalClusters(
         this.seed,
         siteRooms,
-      )
-    ) {
-      if (
-        !roomCircleClear(
-          candidate,
-          occupiedForAttached,
-        )
-      ) {
-        continue;
-      }
+      );
 
-      attachedRooms.push(candidate);
-      occupiedForAttached.push(candidate);
-    }
+    const clusterRooms =
+      localClusters.rooms;
+
+    const clusterBySite =
+      localClusters.clusterBySite;
+
+    const localLinks =
+      localClusters.links;
 
     const edgeMap = new Map();
 
@@ -2334,7 +2901,7 @@ export class InfiniteMapGenerator {
     for (
       const room of [
         ...siteRooms,
-        ...attachedRooms,
+        ...clusterRooms,
       ]
     ) {
       allRooms.set(
@@ -2347,34 +2914,39 @@ export class InfiniteMapGenerator {
     const endpointRecords = [];
     const collisionRooms = [
       ...siteRooms,
-      ...attachedRooms,
+      ...clusterRooms,
     ];
 
-    // Local attached rooms are portal-connected to their source before the
-    // global site graph is considered. They add architectural density without
-    // melting rooms together or creating long connector chains.
+    // Local portal growth creates multi-room architectural masses before any
+    // inter-site obligation is connected. Each accepted child is separated
+    // from every other room and attached through an explicit short passage.
     for (
-      const attached of
-      attachedRooms
+      const link of
+      localLinks
     ) {
       const source =
         allRooms.get(
-          attached.parentRoomId,
+          link.fromRoomId,
         );
 
-      if (!source) continue;
+      const target =
+        allRooms.get(
+          link.toRoomId,
+        );
 
-      const localKey =
-        source.id +
-        '|attached:' +
-        attached.id;
+      if (
+        !source ||
+        !target
+      ) {
+        continue;
+      }
 
       const result =
         connectionBetween(
           this.seed,
           source,
-          attached,
-          localKey,
+          target,
+          link.key,
           false,
           collisionRooms,
         );
@@ -2389,19 +2961,46 @@ export class InfiniteMapGenerator {
     }
 
     for (const [key, edge] of edgeMap) {
-      const roomA =
+      const centralA =
         this.getSiteRoom(
           edge.ax,
           edge.ay,
         );
 
-      const roomB =
+      const centralB =
         this.getSiteRoom(
           edge.bx,
           edge.by,
         );
 
-      if (!roomA || !roomB) continue;
+      if (
+        !centralA ||
+        !centralB
+      ) {
+        continue;
+      }
+
+      const pair =
+        closestClusterPair(
+          clusterBySite.get(
+            siteKey(
+              edge.ax,
+              edge.ay,
+            ),
+          ) || [centralA],
+          clusterBySite.get(
+            siteKey(
+              edge.bx,
+              edge.by,
+            ),
+          ) || [centralB],
+        );
+
+      const roomA =
+        pair.roomA;
+
+      const roomB =
+        pair.roomB;
 
       const edgeBounds = {
         minX:

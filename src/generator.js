@@ -421,6 +421,10 @@ function edgeFabric(seed, ax, ay, bx, by, salt, primary) {
       }
     }
 
+    // Consecutive primary growth events must physically overlap. Connectivity
+    // is carried by ordinary architectural space, never a separate corridor.
+    along = Math.max(along, primary ? 94 : 84);
+
     const idSeed = mix32(eSeed ^ Math.imul(i + 1, 0x27d4eb2d));
     const shape = major && rng() < 0.035 ? 'ellipse' : 'rect';
 
@@ -550,11 +554,10 @@ function macroPrimitives(seed, mx, my) {
         true,
       ),
     );
-  } else {
-    // Root still receives ordinary architecture instead of a special visible hub.
-    out.push(...localBurst(seed, mx, my));
   }
 
+  // Every macro source contributes ordinary accretion; the root is not a
+  // special hub and therefore receives exactly the same local treatment.
   out.push(...localBurst(seed, mx, my));
 
   for (const [nx, ny] of optionalLinks(seed, mx, my)) {

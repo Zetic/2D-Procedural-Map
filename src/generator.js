@@ -318,8 +318,8 @@ function branchRooms(seed, start, baseAngle, branchSeed, profile, depth = 0) {
   let angle = baseAngle;
   const steps =
     2 +
-    Math.floor(rng() * (2 + profile.branch * 3)) +
-    (profile.density > 0.62 ? 1 : 0);
+    Math.floor(rng() * (1 + profile.branch * 2)) +
+    (profile.density > 0.72 && rng() < 0.45 ? 1 : 0);
 
   for (let i = 0; i < steps; i++) {
     angle += (rng() - 0.5) * (0.50 + profile.turn * 0.65);
@@ -328,7 +328,7 @@ function branchRooms(seed, start, baseAngle, branchSeed, profile, depth = 0) {
       angle = Math.round(angle / (Math.PI / 12)) * (Math.PI / 12);
     }
 
-    const scale = 0.72 + profile.scale * 0.74;
+    const scale = 0.68 + profile.scale * 0.62;
     const major = rng() < (0.07 + profile.chamber * 0.10);
     const along = major
       ? (140 + rng() * 150) * scale
@@ -380,7 +380,7 @@ function edgeFabric(seed, ax, ay, bx, by, salt, primary) {
   const polyline = routePolyline(seed, ax, ay, bx, by, salt);
   const routeSamples = resamplePolyline(
     polyline,
-    primary ? 72 : 82,
+    primary ? 64 : 76,
     eSeed ^ 0x111ace,
   );
 
@@ -440,9 +440,9 @@ function edgeFabric(seed, ax, ay, bx, by, salt, primary) {
     );
 
     const branchChance =
-      (primary ? 0.40 : 0.31) +
-      profile.branch * 0.32 +
-      profile.density * 0.16;
+      (primary ? 0.24 : 0.17) +
+      profile.branch * 0.22 +
+      profile.density * 0.10;
 
     if (i > 0 && i < routeSamples.length - 1 && rng() < branchChance) {
       const side = rng() < 0.5 ? -1 : 1;
@@ -506,9 +506,9 @@ function localBurst(seed, mx, my) {
   const out = [];
 
   const chains =
-    2 +
-    Math.floor(profile.density * 3) +
-    (rng() < profile.branch ? 1 : 0);
+    1 +
+    Math.floor(profile.density * 2) +
+    (rng() < profile.branch * 0.45 ? 1 : 0);
 
   for (let c = 0; c < chains; c++) {
     const angle =
@@ -528,7 +528,7 @@ function localBurst(seed, mx, my) {
       profile,
     );
 
-    out.push(...branch.slice(0, 4 + Math.floor(profile.density * 3)));
+    out.push(...branch.slice(0, 3 + Math.floor(profile.density * 2)));
   }
 
   return out;

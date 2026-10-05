@@ -87,24 +87,24 @@ function seededRng(seedValue) {
   };
 }
 
-function choosePalette(seed, cx, cy) {
-  // Most of the world stays in the common cream family. Rare color regions
-  // are correlated over several structural cells so color does not expose the
-  // indexing lattice as a checkerboard of separate islands.
-  const zoneX = Math.floor(cx / 3);
-  const zoneY = Math.floor(cy / 3);
-  const rareZone = hash01(seed, zoneX, zoneY, 701);
+function choosePalette(seed, sx, sy) {
+  // Color belongs to irregular growth families, not rectangular world zones.
+  // Most sites stay in the common cream family; rare families produce the
+  // muted pink/blue/green accents visible in the reference.
+  const rare = hash01(seed, sx, sy, 701);
 
-  let index;
-  if (rareZone < 0.11) {
-    index = 5 + Math.floor(
-      hash01(seed, zoneX, zoneY, 703) * (FLOOR_PALETTES.length - 5),
-    );
-  } else {
-    index = Math.floor(hash01(seed, cx, cy, 702) * 5);
+  if (rare < 0.085) {
+    const index =
+      5 +
+      Math.floor(
+        hash01(seed, sx, sy, 703) *
+          (FLOOR_PALETTES.length - 5),
+      );
+    return FLOOR_PALETTES[Math.min(index, FLOOR_PALETTES.length - 1)];
   }
 
-  return FLOOR_PALETTES[Math.min(index, FLOOR_PALETTES.length - 1)];
+  const common = Math.floor(hash01(seed, sx, sy, 702) * 5);
+  return FLOOR_PALETTES[Math.min(common, 4)];
 }
 
 function siteCandidate(seed, sx, sy) {

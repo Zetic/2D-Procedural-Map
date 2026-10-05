@@ -26,6 +26,22 @@ const FLOOR_PALETTES = [
 
 const TAU = Math.PI * 2;
 
+let cacheSeed = null;
+const acceptedSiteCache = new Map();
+const parentSiteCache = new Map();
+const nearestDistanceCache = new Map();
+const optionalEdgeCache = new Map();
+
+function ensureSeedCaches(seed) {
+  if (cacheSeed === seed) return;
+
+  cacheSeed = seed;
+  acceptedSiteCache.clear();
+  parentSiteCache.clear();
+  nearestDistanceCache.clear();
+  optionalEdgeCache.clear();
+}
+
 function mix32(x) {
   x ^= x >>> 16;
   x = Math.imul(x, 0x7feb352d);
@@ -150,6 +166,14 @@ function siteWins(a, b) {
 }
 
 function isAcceptedSiteInternal(seed, sx, sy) {
+  ensureSeedCaches(seed);
+
+  const key = siteKey(sx, sy);
+
+  if (acceptedSiteCache.has(key)) {
+    return acceptedSiteCache.get(key);
+  }
+
   const candidate = siteCandidate(seed, sx, sy);
 
   for (
@@ -181,11 +205,13 @@ function isAcceptedSiteInternal(seed, sx, sy) {
       }
 
       if (siteWins(other, candidate)) {
+        acceptedSiteCache.set(key, false);
         return false;
       }
     }
   }
 
+  acceptedSiteCache.set(key, true);
   return true;
 }
 
@@ -221,8 +247,23 @@ function rootDistanceSq(seed, sx, sy) {
 }
 
 function parentFor(seed, sx, sy) {
-  if (sx === 0 && sy === 0) return null;
-  if (!isAcceptedSiteInternal(seed, sx, sy)) return null;
+  ensureSeedCaches(seed);
+
+  const key = siteKey(sx, sy);
+
+  if (parentSiteCache.has(key)) {
+    return parentSiteCache.get(key);
+  }
+
+  if (sx === 0 && sy === 0) {
+    parentSiteCache.set(key, null);
+    return null;
+  }
+
+  if (!isAcceptedSiteInternal(seed, sx, sy)) {
+    parentSiteCache.set(key, null);
+    return null;
+  }
 
   const source = siteCandidate(seed, sx, sy);
   const sourceRank = rootDistanceSq(seed, sx, sy);
@@ -303,9 +344,12 @@ function parentFor(seed, sx, sy) {
     }
   }
 
-  return best
+  const result = best
     ? [best.x, best.y]
     : [0, 0];
+
+  parentSiteCache.set(key, result);
+  return result;
 }
 
 export function parentCell(seedText, sx, sy) {
@@ -375,6 +419,14 @@ function edgeKey(ax, ay, bx, by) {
 }
 
 function nearestAcceptedDistance(seed, sx, sy) {
+  ensureSeedCaches(seed);
+
+  const key = siteKey(sx, sy);
+
+  if (nearestDistanceCache.has(key)) {
+    return nearestDistanceCache.get(key);
+  }
+
   const source = siteCandidate(seed, sx, sy);
   let nearest = Infinity;
 
@@ -409,9 +461,12 @@ function nearestAcceptedDistance(seed, sx, sy) {
     }
   }
 
-  return Number.isFinite(nearest)
+  const result = Number.isFinite(nearest)
     ? nearest
     : SITE_GRID * 1.7;
+
+  nearestDistanceCache.set(key, result);
+  return result;
 }
 
 function paletteForRoom(seed, sx, sy, x, y) {
@@ -1441,6 +1496,14 @@ function connectionBetween(
 }
 
 function optionalEdges(seed, sx, sy, room) {
+  ensureSeedCaches(seed);
+
+  const cacheKey = siteKey(sx, sy);
+
+  if (optionalEdgeCache.has(cacheKey)) {
+    return optionalEdgeCache.get(cacheKey);
+  }
+
   const profile = worldProfile(
     seed,
     room.x,
@@ -1526,6 +1589,7 @@ function optionalEdges(seed, sx, sy, room) {
     if (out.length >= 2) break;
   }
 
+  optionalEdgeCache.set(cacheKey, out);
   return out;
 }
 

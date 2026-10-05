@@ -551,42 +551,98 @@ function addRoomDetails(room, rng, profile, protectedSides = []) {
 function createComplex(seed, cx, cy) {
   const anchor = anchorFor(seed, cx, cy);
   const color = choosePalette(seed, cx, cy);
-  const density = 0.72 + hash01(seed, cx, cy, 801) * 0.56;
+  const profile = complexProfile(seed, cx, cy);
+  const density = 0.82 + hash01(seed, cx, cy, 801) * 0.64;
   const rng = seededRng(hashInt(seed, cx, cy, 9001));
   const orientationStep = Math.PI / 12;
   const angle = Math.round((rng() * TAU) / orientationStep) * orientationStep;
+
+  let rootW = 118 + rng() * 84;
+  let rootH = 92 + rng() * 74;
+  let rootKind = 'hub';
+
+  if (profile.name === 'service-maze') {
+    rootW = 92 + rng() * 58;
+    rootH = 76 + rng() * 50;
+    rootKind = 'service-hub';
+  } else if (profile.name === 'galleries') {
+    rootW = 154 + rng() * 94;
+    rootH = 62 + rng() * 54;
+    rootKind = 'gallery-hub';
+  } else if (profile.name === 'atrium') {
+    rootW = 150 + rng() * 100;
+    rootH = 126 + rng() * 88;
+    rootKind = 'atrium';
+  } else if (profile.name === 'office-web') {
+    rootW = 106 + rng() * 66;
+    rootH = 88 + rng() * 58;
+    rootKind = 'office-hub';
+  } else if (profile.name === 'warehouse') {
+    rootW = 172 + rng() * 96;
+    rootH = 136 + rng() * 88;
+    rootKind = 'warehouse';
+  }
 
   const root = {
     id: cx + ':' + cy + ':0',
     x: anchor.x,
     y: anchor.y,
-    w: 112 + rng() * 86,
-    h: 86 + rng() * 72,
+    w: rootW,
+    h: rootH,
     angle,
     color,
     major: true,
+    kind: rootKind,
   };
-  addPartitions(root, rng);
+  addRoomDetails(root, rng, profile, []);
 
   const rooms = [root];
   const doors = [];
   const usedSides = new Set();
   const frontier = [];
-  for (let side = 0; side < 4; side++) frontier.push({ roomIndex: 0, side, depth: 0 });
 
-  const targetRooms = 10 + Math.floor(rng() * 8 + density * 5);
+  for (let side = 0; side < 4; side++) {
+    if (!root.blockedSides.includes(side)) frontier.push({ roomIndex: 0, side, depth: 0, boost: 1.2 });
+  }
+
+  const targetRooms =
+    profile.targetBase +
+    Math.floor(rng() * profile.targetJitter) +
+    Math.floor((density - 0.82) * 8);
+
   let attempts = 0;
+  const maxAttempts = targetRooms * 24;
 
-  while (rooms.length < targetRooms && frontier.length && attempts < targetRooms * 14) {
+  while (rooms.length < targetRooms && frontier.length && attempts < maxAttempts) {
     attempts++;
-    const pickIndex = Math.floor(rng() * frontier.length);
+
+    let pickIndex;
+    if (rng() < 0.46) {
+      let bestScore = -Infinity;
+      pickIndex = 0;
+      for (let i = 0; i < frontier.length; i++) {
+        const front = frontier[i];
+        const score =
+          (front.boost || 1) * (0.65 + rng() * 0.7) -
+          front.depth * 0.018;
+        if (score > bestScore) {
+          bestScore = score;
+          pickIndex = i;
+        }
+      }
+    } else {
+      pickIndex = Math.floor(rng() * frontier.length);
+    }
+
     const front = frontier.splice(pickIndex, 1)[0];
     const sideKey = front.roomIndex + ':' + front.side;
     if (usedSides.has(sideKey)) continue;
 
     const parent = rooms[front.roomIndex];
+    if (parent.blockedSides.includes(front.side)) continue;
+
     const parentSide = sideInfo(parent, front.side);
-    const dims = roomDimensions(rng, front.side, front.depth);
+    const dims = roomDimensions(rng, front.side, front.depth, profile);
     const child = {
       id: cx + ':' + cy + ':' + rooms.length,
       x: 0,
@@ -596,28 +652,54 @@ function createComplex(seed, cx, cy) {
       angle,
       color,
       major: dims.major,
+      kind: dims.kind,
     };
 
+    const incomingSide = oppositeSide(front.side);
     const childNormalHalf = (front.side === 0 || front.side === 2) ? child.w * 0.5 : child.h * 0.5;
     const childCrossHalf = (front.side === 0 || front.side === 2) ? child.h * 0.5 : child.w * 0.5;
-    const offsetLimit = Math.max(0, Math.min(parentSide.halfTangent, childCrossHalf) * 0.38 - 7);
-    const lateral = hashSigned(seed, cx * 997 + rooms.length, cy * 991 + front.roomIndex, front.side + 410) * offsetLimit;
+    const overlapLimit = Math.min(parentSide.halfTangent, childCrossHalf);
+    const offsetLimit = Math.max(0, overlapLimit * 0.62 - 8);
+    const lateral =
+      hashSigned(
+        seed,
+        cx * 997 + rooms.length,
+        cy * 991 + front.roomIndex,
+        front.side + 410,
+      ) * offsetLimit;
 
-    child.x = parentSide.x + parentSide.normal.x * childNormalHalf + parentSide.tangent.x * lateral;
-    child.y = parentSide.y + parentSide.normal.y * childNormalHalf + parentSide.tangent.y * lateral;
+    child.x =
+      parentSide.x +
+      parentSide.normal.x * childNormalHalf +
+      parentSide.tangent.x * lateral;
+    child.y =
+      parentSide.y +
+      parentSide.normal.y * childNormalHalf +
+      parentSide.tangent.y * lateral;
 
     if (!withinComplexRadius(child, anchor)) continue;
     if (collidesWithRooms(child, rooms, front.roomIndex)) continue;
 
-    addPartitions(child, rng);
+    addRoomDetails(child, rng, profile, [incomingSide]);
+
     const childIndex = rooms.length;
     rooms.push(child);
 
     usedSides.add(sideKey);
-    usedSides.add(childIndex + ':' + oppositeSide(front.side));
+    usedSides.add(childIndex + ':' + incomingSide);
 
     const overlapHalf = Math.min(parentSide.halfTangent, childCrossHalf);
-    const doorWidth = Math.max(12, Math.min(36, overlapHalf * 0.80));
+    const fullOverlap = overlapHalf * 2;
+    const openingBias =
+      profile.openChance +
+      (parent.major || child.major ? 0.14 : 0) +
+      (parent.kind === 'gallery' || child.kind === 'gallery' ? 0.06 : 0);
+    const wideOpening = rng() < Math.min(0.82, openingBias);
+
+    const doorWidth = wideOpening
+      ? Math.max(24, Math.min(118, fullOverlap * (0.56 + rng() * 0.28)))
+      : Math.max(11, Math.min(42, fullOverlap * (0.26 + rng() * 0.18)));
+
     const doorX = parentSide.x + parentSide.tangent.x * lateral;
     const doorY = parentSide.y + parentSide.tangent.y * lateral;
     doors.push({
@@ -626,17 +708,66 @@ function createComplex(seed, cx, cy) {
       angle: Math.atan2(parentSide.tangent.y, parentSide.tangent.x),
       width: doorWidth,
       color,
-      kind: 'internal',
+      kind: wideOpening ? 'opening' : 'internal',
     });
 
-    const branchSides = [0, 1, 2, 3].filter((side) => side !== oppositeSide(front.side));
+    const branchSides = [0, 1, 2, 3].filter(
+      (side) =>
+        side !== incomingSide &&
+        !child.blockedSides.includes(side),
+    );
+
     for (const side of branchSides) {
-      const branchChance = side === front.side ? 0.92 : 0.58 + density * 0.10;
-      if (rng() < branchChance) frontier.push({ roomIndex: childIndex, side, depth: front.depth + 1 });
+      const forward = side === front.side;
+      const branchChance = Math.min(
+        0.96,
+        profile.branch * (forward ? 1.10 : 0.78) +
+          (child.major ? 0.05 : 0) +
+          (wideOpening ? 0.04 : 0),
+      );
+
+      if (rng() < branchChance) {
+        frontier.push({
+          roomIndex: childIndex,
+          side,
+          depth: front.depth + 1,
+          boost: forward ? 1.25 : (wideOpening ? 1.12 : 1),
+        });
+      }
     }
 
-    if (rng() < 0.16 && !usedSides.has(front.roomIndex + ':' + ((front.side + 1) % 4))) {
-      frontier.push({ roomIndex: front.roomIndex, side: (front.side + 1) % 4, depth: front.depth + 1 });
+    if (wideOpening && rng() < 0.58) {
+      const sideA = (front.side + 1) % 4;
+      const sideB = (front.side + 3) % 4;
+      for (const side of [sideA, sideB]) {
+        if (
+          side !== incomingSide &&
+          !child.blockedSides.includes(side) &&
+          !usedSides.has(childIndex + ':' + side)
+        ) {
+          frontier.push({
+            roomIndex: childIndex,
+            side,
+            depth: front.depth + 1,
+            boost: 1.38,
+          });
+        }
+      }
+    }
+
+    if (rng() < 0.22) {
+      const parentSideCandidate = (front.side + (rng() < 0.5 ? 1 : 3)) % 4;
+      if (
+        !parent.blockedSides.includes(parentSideCandidate) &&
+        !usedSides.has(front.roomIndex + ':' + parentSideCandidate)
+      ) {
+        frontier.push({
+          roomIndex: front.roomIndex,
+          side: parentSideCandidate,
+          depth: front.depth + 1,
+          boost: 1.08,
+        });
+      }
     }
   }
 
@@ -653,6 +784,7 @@ function createComplex(seed, cx, cy) {
     anchor,
     color,
     angle,
+    profile: profile.name,
     rooms,
     doors,
     usedSides,

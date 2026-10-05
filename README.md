@@ -1,144 +1,247 @@
 # Infinite 2D Procedural Map
 
-A deterministic, exploration-order-independent infinite 2D architectural map for the browser.
+A deterministic, exploration-order-independent infinite architectural map for the browser.
 
-Generator version 8 keeps the continuous accretion introduced in v7, but reconstructs that floor mass into readable architecture instead of rendering it like a cave-shaped occupancy mask.
+Generator version 9 uses **frontier accretion** rather than the earlier node/connector or hidden-route systems.
 
-## Generator v8: continuous mass with actual rooms
+## Final generation model
 
-The visible world still has no separate concepts for:
+Visible architecture is generated from persistent room-growth fronts.
 
-- source complexes
-- destination complexes
-- connector corridors
-- connector-specific rooms
-- connector-specific doors
+There is no rendered concept of:
 
-Global connectivity remains hidden inside one continuous architectural fabric.
+- a district or complex owned by a streaming cell
+- a source complex connected to a destination complex
+- a corridor or road generated between two areas
+- a hidden polyline that rooms are distributed along
+- a connector-specific room or door layer
 
-The major v8 change is that overlapping growth primitives now carry stable **space identities**. The floor is still unioned into one connected mass, but adjacent spaces retain meaningful internal boundaries.
+The generator still maintains a hidden connectivity obligation so the infinite world cannot fragment, but that obligation only biases ordinary architectural growth toward another already-defined growth family.
 
-That produces:
+A front repeatedly performs local architectural events until the required growth families physically merge.
 
-- compound rooms formed from several overlapping primitives
-- retained walls between genuinely different rooms
-- deterministic door/opening gaps in shared walls
-- large chambers with broad openings
-- smaller rooms with narrower doors
-- annexes and branch rooms that read as architecture rather than path decoration
+## Frontier growth
 
-## No more visible raster striping
+Each accepted irregular world-space growth site starts ordinary architecture.
 
-The occupancy raster is now an internal generation representation only.
+Its main frontier maintains:
 
-Rendering changes include:
+- world position
+- heading
+- previous room scale
+- architectural family
+- current compound-space identity
+- distance to the unresolved merge target
+- local density / openness / scale / branch / chamber / turning fields
 
-- smaller 15-world-unit occupancy cells
-- simplified exterior contour paths instead of raw staircase edges
-- diagonal contour simplification for rotated architecture
-- screen-space floor bleed to eliminate subpixel seams between raster rows
-- sparse structured partitions and columns generated from final owned spaces rather than every hidden growth primitive
+Every step chooses an architectural event such as:
 
-The horizontal scanline pattern from v7 is therefore no longer part of the intended rendered output.
+- ordinary room
+- small cell
+- suite
+- long gallery
+- transverse room
+- large chamber
+- compound wing
+- annex cluster
+- side branch
+- branch fork
+- merge chamber
 
-## Exterior silhouette vs interior topology
+The frontier is gently attracted toward its unresolved connectivity target, but local architecture, turning, scale, branching, and world-space fields remain part of every decision. There is no precomputed route.
 
-V7 rendered almost exclusively the union's exterior boundary. That removed visible connectors, but also erased most room semantics.
+As the front approaches its target, attraction strengthens only enough to guarantee a physical merge.
 
-V8 separates two things:
+Consecutive growth events are limited by inscribed-room overlap, so every generated branch is physically connected floor space.
 
-1. **Exterior floor union** — overlapping growth events form irregular compound architecture.
-2. **Interior space ownership** — deterministic ownership partitions that mass back into readable rooms.
+## No long hallway mechanism
 
-When two spaces meet, their shared boundary receives one or more deterministic openings. Very short boundaries may be removed entirely, making the spaces one visually compound room.
+A narrow passage is not used as the global connectivity primitive.
 
-This preserves the desired sprawling silhouette while restoring a map-like internal floor plan.
+The generator forces a chamber event after several non-major events, and primary frontier steps always overlap ordinary room geometry.
 
-## Continuous accretion
+Global connectivity therefore appears as a sequence of rooms, compound spaces, branches, widenings, turns, and mergers rather than:
 
-A sparse hidden parent tree still provides the formal global connectivity guarantee, but it is never rendered as a road layer.
+```text
+complex -------- corridor -------- complex
+```
 
-Each hidden obligation is expanded into ordinary overlapping architectural events:
+## Irregular growth-site field
 
-- rooms
-- transverse rooms
-- galleries
-- large chambers
-- annexes
+The sparse connectivity obligations begin from a deterministic hard-core point field.
+
+A small internal hash lattice only enumerates candidate sites. Nearby candidates suppress one another by stable priority.
+
+Current site constraints include:
+
+- heavy within-cell jitter
+- approximately 495-world-unit hard-core separation
+- varying numbers of accepted sites per 1000×1000 world region
+- empty world buckets as well as multi-site buckets
+
+The indexing lattice therefore does not own visible architecture.
+
+Streaming chunks use a completely different size and serve only as cache/query regions.
+
+## Branching, merging, loops, and infill
+
+Frontier growth is not limited to the required parent merge.
+
+### Side growth
+
+Main fronts continuously create:
+
 - side branches
-- branch forks
-- occasional elliptical features
+- recursive one-level forks
+- compound wings
+- annexes
+- chambers with attached spaces
 
-Primary events overlap physically, so connectivity is represented by normal occupied floor area.
+### Local front merging
 
-Optional links add loops and cause independently generated growth to merge.
+Nearby primitives from different growth families are detected spatially.
 
-## Architectural variation
+When compatible fronts approach one another, a deterministic broad merge/junction chamber is generated. The chamber physically overlaps both sides, so a merge can never create detached decoration.
 
-Smooth deterministic world-space fields vary:
+### Loops
 
-- density
-- openness
-- room scale
-- branch frequency
-- chamber frequency
-- turn frequency
+Nearby accepted growth sites occasionally receive an additional frontier obligation. Those loop fronts use the same room-by-room accretion algorithm, not a separate connector renderer.
 
-Growth families also receive stable floor palettes. Most remain within the cream/tan family used by the reference, while occasional muted pink, blue, green, or brown regions persist as architectural sections rather than horizontal world-space color bands.
+### Deterministic infill
 
-## Streaming
+A secondary world-space candidate field checks irregular empty pockets surrounded by existing architecture.
 
-Streaming chunks are 720 world units wide. The raster cell size is 15 world units.
+When a pocket has architecture on several sides, an infill room can grow outward from the nearest existing space. Infill rooms are forced to overlap their parent geometry.
 
-Chunks are query/cache units only. They do not control:
+This fills enclosed and near-enclosed gaps while preserving larger voids.
 
-- room placement
-- space ownership
-- connectivity
-- style
-- color families
-- growth direction
+## Room shapes
 
-Each chunk is regenerated from deterministic world-space growth with a raster halo. Exploration direction therefore cannot alter boundaries, rooms, openings, or details.
+Rooms are not limited to individual rectangles.
 
-## Connectivity
+Ordinary growth can create:
 
-Every hidden macro coordinate has a deterministic parent that strictly decreases Manhattan rank toward the root.
+- L-like compound rooms
+- multi-wing chambers
+- wide merged spaces
+- suites
+- long galleries
+- transverse spaces
+- small cells
+- annex groups
+- rare elliptical rooms
+- large merge/junction chambers
 
-Consecutive primary growth events physically overlap. Branches originate from already-connected architecture. Shared space boundaries contain deterministic door/opening gaps.
+Several primitives can share one stable space identity, so they render as one compound room.
 
-There is no separate corridor fallback.
+## Final floor-plan reconstruction
+
+Growth geometry is unioned into one floor mass at a 15-world-unit internal occupancy resolution.
+
+The raster is not rendered directly.
+
+The final renderer receives:
+
+- merged floor rectangles
+- simplified exterior contour paths
+- meaningful interior room boundaries
+- deterministic door/opening gaps
+- structured partitions
+- column fields
+
+Shared boundaries between distinct spaces are stitched into architectural wall paths. Deterministic gaps create ordinary doors and occasional broad openings.
+
+Short shared boundaries may disappear completely, allowing adjacent primitives to read as one compound room.
+
+Exterior contours are simplified so rotated architecture produces diagonal/vector-like boundaries instead of raw staircase raster edges.
+
+## Color
+
+Color does not follow connectivity edges.
+
+Most architecture stays within the reference's cream/tan family. Rare muted pink, blue, green, and brown sections come from compact smooth world-space fields and stable space identities.
+
+A connectivity obligation therefore cannot reveal itself as a long colored strip.
+
+## Infinite determinism
+
+All generation decisions are functions of:
+
+`generator version + world seed + stable world coordinates + feature salt`
+
+There is no exploration-order random stream.
+
+The same seed produces the same:
+
+- growth-site field
+- parent obligations
+- frontier turns
+- room events
+- branches
+- merges
+- infill
+- room ownership
+- openings
+- colors
+- details
+
+regardless of exploration direction or query batch size.
+
+## Connectivity guarantee
+
+Every accepted growth site except the root receives a deterministic accepted parent whose squared world-space distance to the root is lower.
+
+The parent relation therefore terminates at the root.
+
+For every required relation:
+
+1. the child starts with connected room geometry,
+2. each new frontier room physically overlaps the previous room,
+3. the frontier continuously steers toward the parent,
+4. forced final growth closes any remaining short distance,
+5. the final merge geometry contains the target point,
+6. the parent has ordinary architecture at that target.
+
+Branches, annexes, merge chambers, and infill rooms are also generated from physically overlapping parent geometry.
+
+The resulting infinite architectural fabric is therefore connected by construction rather than by a separate road layer.
 
 ## Validation
 
-The v8 smoke suite currently verifies:
+The v9 smoke suite checks:
 
-- generator version 8
 - generator/app/test JavaScript syntax
-- strict hidden parent-rank decrease
+- generator version 9
+- irregular hard-core site spacing
+- variable site counts across world-space buckets
+- every sampled parent is itself an accepted growth site
+- every sampled parent strictly decreases world-space root distance
 - no exposed `rooms`, `corridors`, or `doors` connector layers
-- exact exploration-order determinism
-- one dominant connected occupied mass
-- substantial macro density variation
-- hundreds of readable owned spaces in sampled crops
-- substantial internal room-wall geometry
-- simplified diagonal exterior contour segments
-- multiple stable architectural floor tones
+- substantial multi-scale density variation
+- one dominant connected architectural mass in large crops
+- hundreds of readable spaces
+- thousands of interior architectural wall segments
+- diagonal simplified exterior contours
+- multiple stable floor tones
+- identical geometry when a region is generated alone or inside a much larger batch
+- identical geometry after unrelated remote exploration
 
-Current three-seed samples:
+Representative smoke samples:
 
-- `backrooms-71`: 48.9% average sampled density, 99.83% of occupied crop in the largest connected mass, 884 sampled spaces
-- `alpha`: 69.4% density, 99.63% in the largest connected mass, 904 sampled spaces
-- `reference`: 58.9% density, 99.99% in the largest connected mass, 883 sampled spaces
+- `backrooms-71`: 55.5% average sampled density, 99.36% of occupied crop in the largest connected mass
+- `alpha`: 61.0% density, 99.79% in the largest connected mass
+- `reference`: 65.8% density, 99.49% in the largest connected mass
 
-Representative normal viewports generate in roughly 0.35–0.45 seconds in connector-side validation. A very wide low-zoom viewport is roughly 1.8 seconds before browser rendering and benefits from chunk caching while panning.
+Across those crops the suite observes roughly 1,100–1,400 readable spaces and 7,000–8,600 interior wall segments.
+
+An additional 20-seed stress run completed without generation failures.
 
 ## Controls
 
 - Drag: pan through the infinite map.
 - Mouse wheel / trackpad: zoom around the pointer.
 - Seed field: switch deterministic worlds.
-- `?seed=...`: share a specific world through the URL.
+- `?seed=...`: share a deterministic world through the URL.
 
 ## Run locally
 
@@ -148,7 +251,7 @@ python3 -m http.server 8080
 
 Then open `http://localhost:8080`.
 
-For generator validation:
+Run validation with:
 
 ```bash
 npm test
@@ -156,4 +259,4 @@ npm test
 
 ## GitHub Pages
 
-`.github/workflows/pages.yml` runs the smoke suite before deploying `main`.
+`.github/workflows/pages.yml` runs the generator smoke suite before deploying `main`.

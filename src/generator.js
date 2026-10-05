@@ -1151,6 +1151,382 @@ function roomCircleClear(candidate, rooms, ignoreIds = new Set()) {
   return true;
 }
 
+function makeAttachedRoom(
+  seed,
+  sourceRoom,
+  index,
+) {
+  const sx =
+    sourceRoom.sx ?? hashString(sourceRoom.id);
+
+  const sy =
+    sourceRoom.sy ?? index;
+
+  const rng = seededRng(
+    hashInt(
+      seed,
+      sx,
+      sy,
+      5001 + index,
+    ),
+  );
+
+  const profile = worldProfile(
+    seed,
+    sourceRoom.x,
+    sourceRoom.y,
+  );
+
+  const sideChoices = [
+    0,
+    Math.PI / 2,
+    Math.PI,
+    -Math.PI / 2,
+  ];
+
+  const direction =
+    sourceRoom.angle +
+    sideChoices[
+      hashInt(
+        seed,
+        sx,
+        sy,
+        5011 + index,
+      ) % sideChoices.length
+    ] +
+    hashSigned(
+      seed,
+      sx,
+      sy,
+      5021 + index,
+    ) *
+      0.16;
+
+  const kindRoll = rng();
+
+  const kind =
+    kindRoll < 0.28
+      ? 'utility'
+      : kindRoll < 0.58
+        ? 'office'
+        : kindRoll < 0.82
+          ? 'side-room'
+          : 'small-gallery';
+
+  let w =
+    kind === 'small-gallery'
+      ? 74 + rng() * 64
+      : 48 + rng() * 58;
+
+  let h =
+    kind === 'small-gallery'
+      ? 38 + rng() * 34
+      : 42 + rng() * 54;
+
+  const maxRadius =
+    Math.min(
+      66,
+      sourceRoom.radius *
+        (
+          0.52 +
+          profile.scale * 0.12
+        ),
+    );
+
+  let radius =
+    Math.hypot(w, h) * 0.5;
+
+  if (radius > maxRadius) {
+    const scale =
+      maxRadius / radius;
+
+    w *= scale;
+    h *= scale;
+    radius = maxRadius;
+  }
+
+  const angle =
+    Math.round(
+      (
+        sourceRoom.angle +
+        hashSigned(
+          seed,
+          sx,
+          sy,
+          5031 + index,
+        ) *
+          0.34
+      ) /
+        (Math.PI / 12),
+    ) *
+    (Math.PI / 12);
+
+  const shapeRoll = rng();
+
+  const shape =
+    shapeRoll < 0.13
+      ? 'l'
+      : shapeRoll < 0.24
+        ? 'step'
+        : 'rect';
+
+  const variant =
+    hashInt(
+      seed,
+      sx,
+      sy,
+      5041 + index,
+    ) % 16;
+
+  const localVertices =
+    localShapeVertices(
+      shape,
+      w,
+      h,
+      variant,
+    );
+
+  const sourcePortal =
+    rayToRoomBoundary(
+      sourceRoom,
+      direction,
+    );
+
+  if (!sourcePortal) {
+    return null;
+  }
+
+  const provisionalVertices =
+    transformVertices(
+      localVertices,
+      0,
+      0,
+      angle,
+    );
+
+  const provisional = {
+    x: 0,
+    y: 0,
+    radius,
+    vertices:
+      provisionalVertices,
+  };
+
+  const reversePortal =
+    rayToRoomBoundary(
+      provisional,
+      direction + Math.PI,
+    );
+
+  if (!reversePortal) {
+    return null;
+  }
+
+  const candidateExtent =
+    Math.hypot(
+      reversePortal.x,
+      reversePortal.y,
+    );
+
+  const sourceExtent =
+    Math.hypot(
+      sourcePortal.x -
+        sourceRoom.x,
+      sourcePortal.y -
+        sourceRoom.y,
+    );
+
+  const gap =
+    8 + rng() * 22;
+
+  const centerDistance =
+    sourceExtent +
+    candidateExtent +
+    gap;
+
+  const x =
+    sourceRoom.x +
+    Math.cos(direction) *
+      centerDistance;
+
+  const y =
+    sourceRoom.y +
+    Math.sin(direction) *
+      centerDistance;
+
+  const vertices =
+    transformVertices(
+      localVertices,
+      x,
+      y,
+      angle,
+    );
+
+  const colorIndex =
+    hash01(
+      seed,
+      sx,
+      sy,
+      5051 + index,
+    ) < 0.84
+      ? sourceRoom.colorIndex
+      : clamp(
+          sourceRoom.colorIndex +
+            (
+              hash01(
+                seed,
+                sx,
+                sy,
+                5061 + index,
+              ) < 0.5
+                ? -1
+                : 1
+            ),
+          0,
+          4,
+        );
+
+  return {
+    id:
+      'attached:' +
+      sourceRoom.id +
+      ':' +
+      index,
+    source: 'attached',
+    parentRoomId:
+      sourceRoom.id,
+    priority:
+      hashInt(
+        seed,
+        sx,
+        sy,
+        5071 + index,
+      ),
+    x,
+    y,
+    w,
+    h,
+    radius,
+    angle,
+    kind,
+    major: false,
+    shape,
+    variant,
+    vertices,
+    aabb:
+      polygonAabb(vertices),
+    color:
+      FLOOR_PALETTES[
+        colorIndex
+      ],
+    colorIndex,
+    wallColor:
+      WALL_COLOR,
+    doors: [],
+    details: [],
+  };
+}
+
+function attachedRoomCandidates(
+  seed,
+  siteRooms,
+) {
+  const candidates = [];
+
+  for (const room of siteRooms) {
+    const profile =
+      worldProfile(
+        seed,
+        room.x,
+        room.y,
+      );
+
+    const roll =
+      hash01(
+        seed,
+        room.sx,
+        room.sy,
+        5081,
+      );
+
+    let count = 0;
+
+    if (
+      roll <
+      0.38 +
+        profile.density * 0.38
+    ) {
+      count += 1;
+    }
+
+    if (
+      hash01(
+        seed,
+        room.sx,
+        room.sy,
+        5082,
+      ) <
+      0.10 +
+        profile.density * 0.20
+    ) {
+      count += 1;
+    }
+
+    if (
+      room.major &&
+      hash01(
+        seed,
+        room.sx,
+        room.sy,
+        5083,
+      ) < 0.34
+    ) {
+      count += 1;
+    }
+
+    count = Math.min(count, 3);
+
+    for (
+      let index = 0;
+      index < count;
+      index++
+    ) {
+      const candidate =
+        makeAttachedRoom(
+          seed,
+          room,
+          index,
+        );
+
+      if (candidate) {
+        candidates.push(
+          candidate,
+        );
+      }
+    }
+  }
+
+  candidates.sort(
+    (a, b) => {
+      if (
+        a.priority !==
+        b.priority
+      ) {
+        return (
+          a.priority -
+          b.priority
+        );
+      }
+
+      return a.id.localeCompare(
+        b.id,
+      );
+    },
+  );
+
+  return candidates;
+}
+
 function makeTransitionRoom(
   seed,
   key,
@@ -1786,6 +2162,31 @@ export class InfiniteMapGenerator {
       ...siteRoomMap.values(),
     ];
 
+    const attachedRooms = [];
+    const occupiedForAttached = [
+      ...siteRooms,
+    ];
+
+    for (
+      const candidate of
+      attachedRoomCandidates(
+        this.seed,
+        siteRooms,
+      )
+    ) {
+      if (
+        !roomCircleClear(
+          candidate,
+          occupiedForAttached,
+        )
+      ) {
+        continue;
+      }
+
+      attachedRooms.push(candidate);
+      occupiedForAttached.push(candidate);
+    }
+
     const edgeMap = new Map();
 
     for (const room of siteRooms) {
@@ -1855,7 +2256,12 @@ export class InfiniteMapGenerator {
 
     const allRooms = new Map();
 
-    for (const room of siteRooms) {
+    for (
+      const room of [
+        ...siteRooms,
+        ...attachedRooms,
+      ]
+    ) {
       allRooms.set(
         room.id,
         cloneRoom(room),
@@ -1864,7 +2270,48 @@ export class InfiniteMapGenerator {
 
     const connectors = [];
     const endpointRecords = [];
-    const collisionRooms = [...siteRooms];
+    const collisionRooms = [
+      ...siteRooms,
+      ...attachedRooms,
+    ];
+
+    // Local attached rooms are portal-connected to their source before the
+    // global site graph is considered. They add architectural density without
+    // melting rooms together or creating long connector chains.
+    for (
+      const attached of
+      attachedRooms
+    ) {
+      const source =
+        allRooms.get(
+          attached.parentRoomId,
+        );
+
+      if (!source) continue;
+
+      const localKey =
+        source.id +
+        '|attached:' +
+        attached.id;
+
+      const result =
+        connectionBetween(
+          this.seed,
+          source,
+          attached,
+          localKey,
+          false,
+          collisionRooms,
+        );
+
+      connectors.push(
+        ...result.connectors,
+      );
+
+      endpointRecords.push(
+        ...result.endpoints,
+      );
+    }
 
     for (const [key, edge] of edgeMap) {
       const roomA =

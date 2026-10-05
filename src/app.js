@@ -50,13 +50,18 @@ function worldBounds() {
   };
 }
 
-function drawPath(path, width, color) {
-  if (!path || path.length < 2) return;
+function tracePath(path) {
+  if (!path || path.length < 2) return false;
   ctx.beginPath();
   ctx.moveTo(path[0].x, path[0].y);
   for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+  return true;
+}
+
+function drawPath(path, width, color) {
+  if (!tracePath(path)) return;
   ctx.lineJoin = 'miter';
-  ctx.lineCap = 'butt';
+  ctx.lineCap = 'square';
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.stroke();
@@ -70,17 +75,27 @@ function withRoomTransform(room, callback) {
   ctx.restore();
 }
 
-function drawRoom(room, detailLevel) {
+function drawRoomWall(room) {
   withRoomTransform(room, () => {
-    ctx.fillStyle = room.color;
     ctx.strokeStyle = wall;
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 8;
     ctx.beginPath();
     ctx.rect(-room.w / 2, -room.h / 2, room.w, room.h);
-    ctx.fill();
     ctx.stroke();
+  });
+}
 
-    if (detailLevel < 2) return;
+function drawRoomFloor(room) {
+  withRoomTransform(room, () => {
+    ctx.fillStyle = room.color;
+    ctx.fillRect(-room.w / 2, -room.h / 2, room.w, room.h);
+  });
+}
+
+function drawRoomDetails(room, detailLevel) {
+  if (detailLevel < 2) return;
+
+  withRoomTransform(room, () => {
     ctx.strokeStyle = interiorLine;
     ctx.lineWidth = 2;
 
@@ -135,6 +150,8 @@ function render() {
   const cells = generator.query(worldBounds());
   const detailLevel = camera.zoom < 0.24 ? 0 : camera.zoom < 0.42 ? 1 : camera.zoom < 0.72 ? 2 : 3;
 
+  // All walls are rendered as underlays. The floor pass covers wall segments
+  // at actual intersections, turning collisions into openings and junctions.
   for (const cell of cells) {
     for (const corridor of cell.corridors) {
       if (detailLevel === 0 && corridor.detail) continue;
@@ -144,14 +161,26 @@ function render() {
 
   if (detailLevel > 0) {
     for (const cell of cells) {
-      for (const room of cell.rooms) drawRoom(room, detailLevel);
+      for (const room of cell.rooms) drawRoomWall(room);
     }
   }
 
+  // Corridors paint through wall underlays first so room boundaries get
+  // doorway-sized cuts wherever the connected floor reaches them.
   for (const cell of cells) {
     for (const corridor of cell.corridors) {
       if (detailLevel === 0 && corridor.detail) continue;
       drawPath(corridor.points, corridor.width, corridor.color);
+    }
+  }
+
+  if (detailLevel > 0) {
+    for (const cell of cells) {
+      for (const room of cell.rooms) drawRoomFloor(room);
+    }
+
+    for (const cell of cells) {
+      for (const room of cell.rooms) drawRoomDetails(room, detailLevel);
     }
   }
 

@@ -11,6 +11,17 @@ The visual structure is generated as **organic growth constrained by a hidden co
 - Every decision is derived from `seed + stable world coordinates + feature salt`; generation never depends on exploration order or a global RNG stream.
 - Query cells are only an indexing/cache mechanism. They do not define doors, rooms, or visible boundaries.
 
+## Collision-aware floor generation
+
+Generator version 2 treats the map as a single 2D floor with no elevation:
+
+- Every proposed room gets a stable deterministic ID and priority.
+- Oriented-room collision tests use a separating-axis test with a small clearance margin.
+- When two room candidates conflict, the same priority winner survives regardless of which direction the map was explored from.
+- Corridors are part of the connected floor rather than a visual layer placed above rooms.
+- Rendering uses wall underlays followed by floor fills, so corridor/room and corridor/corridor intersections become real openings and junctions instead of overlapping shapes.
+- Directly connected room clusters and dead-end branches remain possible, but two room interiors cannot occupy the same 2D space.
+
 ## Run locally
 
 This project is static. Serve the repository root with any local HTTP server, for example:
@@ -36,4 +47,4 @@ Then open `http://localhost:8080`.
 
 The generator uses 32-bit integer hashing (`Math.imul`, shifts, and stable string hashing) for structural decisions. Each structural cell can be regenerated independently, so visiting east then north produces the same geometry as visiting north then east.
 
-The generator version is currently implicit in the source code. Before introducing breaking generation changes for persistent worlds, add an explicit generator-version value to the seed/hash namespace.
+The current hash namespace is explicitly versioned as generator version 2. This prevents later algorithm revisions from silently pretending to be the same deterministic world generation contract.

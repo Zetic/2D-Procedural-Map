@@ -1614,7 +1614,7 @@ export class InfiniteMapGenerator {
     return complex;
   }
 
-  getObstacleRooms(ax, ay, bx, by, corridorWidth, skipRoomIds = new Set()) {
+  getObstacleRooms(ax, ay, bx, by, corridorWidth) {
     const minX = Math.min(ax, bx) - 2;
     const maxX = Math.max(ax, bx) + 2;
     const minY = Math.min(ay, by) - 2;
@@ -1630,7 +1630,6 @@ export class InfiniteMapGenerator {
         // thread through architectural gaps instead of drawing highways around
         // isolated blobs.
         for (const room of complex.rooms) {
-          if (skipRoomIds.has(room.id)) continue;
           obstacles.push({
             x: room.x,
             y: room.y,
@@ -1680,20 +1679,12 @@ export class InfiniteMapGenerator {
     const sourceOutside = sourceExit.outside;
     const targetOutside = targetExit.outside;
 
-    const sourceRoom = source.rooms[sourcePortal.roomIndex];
-    const targetRoom = target.rooms[targetPortal.roomIndex];
-    const skipRoomIds = new Set([
-      sourceRoom && sourceRoom.id,
-      targetRoom && targetRoom.id,
-    ].filter(Boolean));
-
     const obstacles = this.getObstacleRooms(
       ax,
       ay,
       bx,
       by,
       width,
-      skipRoomIds,
     );
 
     const routed =

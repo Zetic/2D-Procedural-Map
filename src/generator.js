@@ -1808,26 +1808,58 @@ export class InfiniteMapGenerator {
       width,
     );
 
-    const routed =
-      routeAStar(sourceOutside, targetOutside, obstacles, routeSeed) ||
-      fallbackRoute(sourceOutside, targetOutside, obstacles, routeSeed);
+    const gridRoute = routeAStar(
+      sourceOutside,
+      targetOutside,
+      obstacles,
+      routeSeed,
+    );
 
-    const rawMiddle = routed || [sourceOutside, targetOutside];
-    const rawRoute = [sourceOutside];
+    let routed = null;
 
-    for (const point of rawMiddle) {
-      const last = rawRoute[rawRoute.length - 1];
-      if (Math.hypot(point.x - last.x, point.y - last.y) > 1) {
-        rawRoute.push(point);
+    if (gridRoute) {
+      const candidate = [sourceOutside];
+      for (const point of gridRoute) {
+        const last = candidate[candidate.length - 1];
+        if (Math.hypot(point.x - last.x, point.y - last.y) > 1) {
+          candidate.push(point);
+        }
       }
+
+      const last = candidate[candidate.length - 1];
+      if (Math.hypot(targetOutside.x - last.x, targetOutside.y - last.y) > 1) {
+        candidate.push(targetOutside);
+      }
+
+      if (pathClear(candidate, obstacles)) routed = candidate;
     }
 
-    const lastRoute = rawRoute[rawRoute.length - 1];
-    if (Math.hypot(targetOutside.x - lastRoute.x, targetOutside.y - lastRoute.y) > 1) {
-      rawRoute.push(targetOutside);
+    if (!routed) {
+      routed = fallbackRoute(
+        sourceOutside,
+        targetOutside,
+        obstacles,
+        routeSeed,
+      );
     }
 
-    const simplified = simplifyPath(rawRoute);
+    if (!routed) {
+      routed = detourAroundObstacles(
+        sourceOutside,
+        targetOutside,
+        obstacles,
+        routeSeed,
+      );
+    }
+
+    // The detour solver operates directly against the room obstacle field and
+    // is the final deterministic connectivity fallback. In normal operation it
+    // resolves every remaining path after A* / dogleg routing.
+    if (!routed) {
+      throw new Error('Unable to route architectural growth for ' + edgeKey);
+    }
+
+    const simplified = simplifyPath(routed);
     const color =
       hash01(routeSeed, 1, 2, 3) < 0.56
         ? source.color

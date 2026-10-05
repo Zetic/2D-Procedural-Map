@@ -1867,11 +1867,24 @@ function detourAroundObstacles(start, goal, obstacles, routeSeed) {
 function chamberClear(chamber, obstacles, corridorWidth) {
   const halfDiag = Math.hypot(chamber.w, chamber.h) * 0.5;
   const extra = Math.max(0, halfDiag - corridorWidth * 0.5);
+
   for (const obstacle of obstacles) {
-    if (Math.hypot(chamber.x - obstacle.x, chamber.y - obstacle.y) < obstacle.r + extra + 5) {
+    if (obstacle.room) {
+      if (roomsOverlap(chamber, obstacle.room, 3)) return false;
+      continue;
+    }
+
+    if (
+      Math.hypot(
+        chamber.x - obstacle.x,
+        chamber.y - obstacle.y,
+      ) <
+      obstacle.r + extra + 5
+    ) {
       return false;
     }
   }
+
   return true;
 }
 

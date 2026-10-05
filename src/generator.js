@@ -1,5 +1,5 @@
 export const CELL_SIZE = 760;
-export const QUERY_HALO = 2;
+export const QUERY_HALO = 1;
 export const GENERATOR_VERSION = 5;
 
 const TAU = Math.PI * 2;

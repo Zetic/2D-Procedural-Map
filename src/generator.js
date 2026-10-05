@@ -4,7 +4,7 @@ export const GENERATOR_VERSION = 5;
 
 const TAU = Math.PI * 2;
 const MAX_COMPLEX_RADIUS = 315;
-const ROUTE_STEP = 42;
+const ROUTE_STEP = 64;
 const WALL = '#665947';
 const FLOOR_PALETTES = [
   '#ead29c', '#e6c98b', '#ecd5a8', '#dfc08b', '#e9d0a2',
@@ -1207,7 +1207,7 @@ function routeAStar(start, goal, obstacles, routeSeed) {
   const rawSY = Math.round(start.y / ROUTE_STEP);
   const rawGX = Math.round(goal.x / ROUTE_STEP);
   const rawGY = Math.round(goal.y / ROUTE_STEP);
-  const margin = 28;
+  const margin = 16;
 
   const minX = Math.min(rawSX, rawGX) - margin;
   const maxX = Math.max(rawSX, rawGX) + margin;
@@ -1770,10 +1770,10 @@ export class InfiniteMapGenerator {
   }
 
   getObstacleRooms(ax, ay, bx, by, corridorWidth) {
-    const minX = Math.min(ax, bx) - 2;
-    const maxX = Math.max(ax, bx) + 2;
-    const minY = Math.min(ay, by) - 2;
-    const maxY = Math.max(ay, by) + 2;
+    const minX = Math.min(ax, bx) - 1;
+    const maxX = Math.max(ax, bx) + 1;
+    const minY = Math.min(ay, by) - 1;
+    const maxY = Math.max(ay, by) + 1;
     const obstacles = [];
 
     for (let cy = minY; cy <= maxY; cy++) {

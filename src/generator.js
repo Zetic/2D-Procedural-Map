@@ -1948,7 +1948,7 @@ function buildConnectionFabric(points, width, color, routeSeed, obstacles) {
       ? 64 + rng() * 58
       : 42 + rng() * 42;
 
-    const chamber = {
+    let chamber = {
       id: 'fabric:' + routeSeed + ':' + i,
       x: point.x,
       y: point.y,
@@ -1962,7 +1962,45 @@ function buildConnectionFabric(points, width, color, routeSeed, obstacles) {
 
     connectionRoomDetails(chamber, routeSeed, i);
 
-    if (!fabricRoomClear(chamber, obstacles, chambers, width)) continue;
+    if (!fabricRoomClear(chamber, obstacles, chambers, width)) {
+      // Do not allow a rejected large room to turn this section back into a
+      // featureless hallway. Try smaller architectural waypoints before
+      // leaving the route bare.
+      let fallback = null;
+
+      for (let retry = 1; retry <= 3; retry++) {
+        const scale = 1 - retry * 0.16;
+        const shifted = (retry - 2) * width * 0.30;
+        const nx = -Math.sin(angle);
+        const ny = Math.cos(angle);
+
+        const candidate = {
+          id: 'fabric:' + routeSeed + ':' + i + ':fallback:' + retry,
+          x: point.x + nx * shifted,
+          y: point.y + ny * shifted,
+          w: Math.max(34, along * scale),
+          h: Math.max(width * 1.55, cross * scale),
+          angle,
+          color,
+          major: false,
+          kind: retry === 3 ? 'passage-room' : 'connector-room',
+        };
+
+        connectionRoomDetails(
+          candidate,
+          routeSeed ^ (0x7100 + retry),
+          i * 7 + retry,
+        );
+
+        if (fabricRoomClear(candidate, obstacles, chambers, width)) {
+          fallback = candidate;
+          break;
+        }
+      }
+
+      if (!fallback) continue;
+      chamber = fallback;
+    }
 
     const chamberIndex = chambers.length;
     chambers.push(chamber);

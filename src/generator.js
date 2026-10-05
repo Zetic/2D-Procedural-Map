@@ -138,24 +138,24 @@ function optionalNeighborEdges(seed, cx, cy) {
     [cx, cy + 1, 32],
     [cx + 1, cy + 1, 33],
     [cx + 1, cy - 1, 34],
-    [cx + 2, cy + 1, 35],
-    [cx + 1, cy + 2, 36],
-    [cx + 2, cy - 1, 37],
-    [cx + 1, cy - 2, 38],
   ];
 
   for (const [nx, ny, salt] of candidates) {
     if (isTreeEdge(seed, cx, cy, nx, ny)) continue;
+
     const edge = canonicalEdgeKey(cx, cy, nx, ny);
-    const chance = ((hashString(edge) ^ seed ^ salt) >>> 0) / 4294967296;
-    const span = Math.max(Math.abs(nx - cx), Math.abs(ny - cy));
-    const rankDelta = Math.abs(distanceRank(nx, ny) - distanceRank(cx, cy));
-    const threshold =
-      span > 1 ? 0.032 :
-      rankDelta === 0 ? 0.22 : 0.11;
+    const chance =
+      ((hashString(edge) ^ seed ^ salt) >>> 0) / 4294967296;
+    const rankDelta =
+      Math.abs(distanceRank(nx, ny) - distanceRank(cx, cy));
+
+    // Extra links stay local. Long graph edges were a major source of the
+    // visible "blob -> road -> blob" pattern even after room decoration.
+    const threshold = rankDelta === 0 ? 0.25 : 0.14;
 
     if (chance < threshold) output.push([nx, ny]);
   }
+
   return output;
 }
 

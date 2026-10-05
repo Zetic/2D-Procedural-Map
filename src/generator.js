@@ -648,14 +648,14 @@ function roomForSite(seed, sx, sy) {
   );
 
   const sparse =
-    0.78 +
-    profile.density * 0.22;
+    0.86 +
+    profile.density * 0.14;
 
   const maxRadius =
     nearest *
     (
-      0.37 +
-      profile.density * 0.09
+      0.41 +
+      profile.density * 0.055
     );
 
   const major =
@@ -691,8 +691,10 @@ function roomForSite(seed, sx, sy) {
     maxRadius *
     (
       major
-        ? 0.94 + rng() * 0.06
-        : 0.78 + rng() * 0.21
+        ? 0.96 + rng() * 0.04
+        : kind === 'cell'
+          ? 0.62 + rng() * 0.17
+          : 0.84 + rng() * 0.15
     ) *
     sparse;
 

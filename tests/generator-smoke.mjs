@@ -130,20 +130,41 @@ function verifyBlueNoiseSites(seed, cells) {
 
   const bucketCounts = new Map();
   const bucketSize = 900;
+  let minBX = Infinity;
+  let maxBX = -Infinity;
+  let minBY = Infinity;
+  let maxBY = -Infinity;
 
   for (const site of sites) {
     const bx = Math.floor(site.x / bucketSize);
     const by = Math.floor(site.y / bucketSize);
+    minBX = Math.min(minBX, bx);
+    maxBX = Math.max(maxBX, bx);
+    minBY = Math.min(minBY, by);
+    maxBY = Math.max(maxBY, by);
     const key = `${bx},${by}`;
     bucketCounts.set(key, (bucketCounts.get(key) || 0) + 1);
   }
 
-  const counts = [...bucketCounts.values()];
-  const uniqueCounts = new Set(counts);
+  const counts = [];
+
+  for (let by = minBY; by <= maxBY; by++) {
+    for (let bx = minBX; bx <= maxBX; bx++) {
+      counts.push(bucketCounts.get(`${bx},${by}`) || 0);
+    }
+  }
 
   assert(
-    uniqueCounts.size >= 2,
-    'Expected irregular site counts per query-sized bucket',
+    new Set(counts).size >= 3,
+    'Expected strongly varying site counts per query-sized bucket',
+  );
+  assert(
+    counts.some((count) => count === 0),
+    'Expected some query-sized buckets to contain no growth source',
+  );
+  assert(
+    counts.some((count) => count >= 2),
+    'Expected some query-sized buckets to contain multiple growth sources',
   );
 }
 

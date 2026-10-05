@@ -2,72 +2,93 @@
 
 A deterministic, exploration-order-independent infinite 2D architectural map for the browser.
 
-Generator version 5 removes the previous **blob → long corridor → blob** structure. Hidden connectivity is now expressed as continuous architectural growth: short halls repeatedly expand into rooms, waystations, annexes, branches, and junctions.
+Generator version 6 removes the last architectural dependency on a regular structural grid.
 
-## Generation model
+## Generator v6: irregular growth field
 
-The world still has a deterministic connectivity skeleton, but that skeleton is no longer rendered as a visible road network.
+Earlier versions still had one main architectural source per regular structural cell. Even with jittered anchors, diagonal parents, and room-filled connectors, zooming far out could reveal the original lattice.
 
-1. **Hidden connectivity constraints** — every structural source has deterministic lower-rank connection options toward the origin.
-2. **Dense local room growth** — collision-free room complexes grow from wall frontiers.
-3. **Continuous connection fabric** — required macro connections are resampled into short segments and populated with rooms/branches along the route.
-4. **Local merging and junctions** — crossing connection fabrics render as same-floor unions rather than overpasses.
+Version 6 replaces that model with a deterministic blue-noise growth field:
 
-Streaming cells remain deterministic indexing/cache units only. They do not define visible walls or chunk boundaries.
+- a small internal hash lattice creates only **candidate** world-space points
+- candidates compete with nearby candidates by stable hash priority
+- candidates closer than the minimum separation suppress one another
+- the surviving sites form an irregular deterministic point field
+- there is no one-site-per-cell rule
+- query/cache buckets are completely separate from architectural ownership
+- architecture can extend across any query boundary
 
-## Continuous architectural growth
+The internal candidate lattice is therefore only an enumeration mechanism. Its cells do not own rooms, districts, doors, connections, colors, or visible boundaries.
 
-Version 5 specifically targets the visible grid/spoke problem from earlier versions.
+## Connectivity without visible roads
 
-- Structural spacing is reduced while local complex radius is increased.
-- Hidden parent choices frequently use diagonals instead of Manhattan-only movement.
-- Parent connections can deterministically select nearby lower-rank alternatives when dense geometry blocks the preferred connection.
-- Macro connections use actual room-scale obstacles instead of one large circular exclusion zone around an entire district.
-- Routes can therefore thread through existing architectural gaps rather than wrapping around isolated blobs.
-- Connector geometry is resampled so uninterrupted rendered segments stay short.
-- Every route repeatedly attempts to create a waystation, connector room, or hall-room.
-- Rejected large connector rooms retry as smaller deterministic passage rooms rather than leaving long bare hallway stretches.
-- Waystations can grow side annexes and second-generation branch rooms.
-- Connection-fabric rooms have partitions/columns just like local complexes.
-- Same-floor route/fabric intersections visually merge into junctions.
+Every accepted growth site has a deterministic lower-rank parent toward the root site.
 
-The smoke suite currently requires connector segments to remain under 115 world units; sampled v5 layouts remain under ~84 units.
+The parent relationship is a connectivity obligation, not a request to draw a straight road. Required connections are converted into architectural fabric:
 
-## Local architectural variety
+- short growth-spine segments
+- waystations
+- connector rooms
+- hall rooms
+- passage rooms
+- side annexes
+- second-generation branch rooms
+- wide openings and junctions
 
-The v4 room families remain:
+A blocked preferred parent can use another deterministic lower-rank nearby site. Parent rank always decreases, so every accepted site still has a finite chain toward the root.
+
+Optional local links add loops without changing that guarantee.
+
+## No regular placement rhythm
+
+Accepted sites are separated by a deterministic hard-core distance and can occur at arbitrary positions inside their candidate buckets.
+
+The smoke suite verifies:
+
+- accepted sites maintain the required minimum separation
+- query-sized world buckets contain varying numbers of architectural sites
+- parent chains monotonically approach the root
+- exploration order does not alter generated geometry
+
+This specifically prevents the previous pattern of one dense island appearing at every fixed interval.
+
+## Continuous architectural fabric
+
+Local growth retains the varied room families from v4/v5:
 
 - service mazes
-- gallery districts
+- galleries
 - atriums
 - office webs
-- warehouse districts
-- mixed districts
+- warehouse areas
+- mixed architectural regions
 
-Local rooms can include narrow cells, service halls, long galleries, offices, suites, atriums, warehouses, loading halls, partitions, column fields, courtyards, side notches, corner notches, and wide compound openings.
+Rooms may contain partitions, columns, notches, courtyards, wide openings, offices, halls, utility rooms, galleries, and larger chambers.
+
+Between local growth sources, v5-style connection fabric remains, but the sources are now irregularly distributed rather than grid-owned. The connection layer also uses room-scale occupancy and short uninterrupted segments, so it behaves as expanding architecture rather than a long road between regularly spaced blobs.
 
 ## Single-floor collision rules
 
 The generator assumes one floor and no elevation.
 
-- Local room interiors cannot overlap.
-- Main connection centerlines cannot pass through local room interiors.
-- Connection-fabric rooms cannot overlap local room interiors.
-- Entry into a local complex happens only through explicit exterior portals.
-- Portal runways are checked against nearby occupied geometry.
-- Crossings between independent connection fabrics are treated as same-floor merged junctions, not one structure passing over another.
+- local room interiors cannot overlap
+- growth spines cannot cross local room interiors
+- connection-fabric rooms cannot overlap local room interiors
+- entry into a local growth region occurs through explicit exterior portals
+- route occupancy includes multiple neighboring candidate rings because accepted sites are heavily jittered
+- independent growth fabrics that meet are treated as same-floor junctions rather than overpasses
 
 ## Determinism
 
-Every structural choice comes from:
+Every decision comes from:
 
 `generator version + world seed + stable world coordinates + feature salt`
 
 There is no exploration-driven global random stream.
 
-The same seed therefore regenerates the same rooms, routes, branches, openings, and connection fabric regardless of exploration order.
+The same seed therefore regenerates the same accepted growth sites, rooms, routes, branches, openings, and junctions regardless of exploration direction.
 
-Generator version 5 is part of the hash namespace.
+Generator version 6 is part of the hash namespace.
 
 ## Controls
 
@@ -92,4 +113,24 @@ npm test
 
 ## GitHub Pages
 
-`.github/workflows/pages.yml` validates the generator before deploying `main`.
+`.github/workflows/pages.yml` runs the generator smoke suite before deploying `main`.
+
+
+## Current v6 validation snapshot
+
+The current smoke suite samples three seeds across six large regions and checks the grid-independent field directly.
+
+- 342 accepted irregular growth sites
+- 3,400 local rooms
+- 359 required/optional growth connections
+- 2,352 connection-fabric rooms
+- 1,294 fabric openings/doors
+- 9.94 local rooms per accepted site on average
+- 6.55 fabric rooms per connection on average
+- maximum sampled uninterrupted spine segment: 83.97 world units
+- zero local room-room overlaps
+- zero growth-spine intersections through local rooms
+- zero connection-fabric room overlaps through local rooms
+- accepted sites stay at least 500 world units apart
+- query-sized world buckets include both zero-site and multi-site cases
+- exploration-order determinism passes exact re-query comparison

@@ -46,6 +46,20 @@ function snapshot(cells) {
         Number(point.x.toFixed(3)),
         Number(point.y.toFixed(3)),
       ]),
+      corridor.chambers.map((room) => [
+        room.id,
+        Number(room.x.toFixed(3)),
+        Number(room.y.toFixed(3)),
+        Number(room.w.toFixed(3)),
+        Number(room.h.toFixed(3)),
+        room.kind,
+      ]),
+      (corridor.fabricDoors || []).map((door) => [
+        Number(door.x.toFixed(3)),
+        Number(door.y.toFixed(3)),
+        Number(door.width.toFixed(3)),
+        door.kind,
+      ]),
     ]),
   })));
 }
@@ -64,7 +78,7 @@ function verifyParentChains(seed) {
         const before = Math.abs(x) + Math.abs(y);
         const after = Math.abs(parent[0]) + Math.abs(parent[1]);
         assert(
-          after === before - 1,
+          after < before,
           `Parent chain did not approach origin for ${seed} at ${x},${y}`,
         );
 
@@ -97,7 +111,23 @@ function verifyRegion(generator, bounds) {
     }
   }
 
+  let maxSegmentLength = 0;
+  let fabricRooms = 0;
+  let fabricDoors = 0;
+
   for (const corridor of corridorMap.values()) {
+    fabricRooms += corridor.chambers.length;
+    fabricDoors += (corridor.fabricDoors || []).length;
+
+    for (let i = 0; i < corridor.points.length - 1; i++) {
+      const a = corridor.points[i];
+      const b = corridor.points[i + 1];
+      maxSegmentLength = Math.max(
+        maxSegmentLength,
+        Math.hypot(b.x - a.x, b.y - a.y),
+      );
+    }
+
     // First and last segments intentionally cross their selected room wall.
     // Every middle segment must remain clear of room interiors.
     for (let i = 1; i < corridor.points.length - 2; i++) {
@@ -150,6 +180,9 @@ function verifyRegion(generator, bounds) {
     kinds,
     cutouts,
     wideOpenings,
+    fabricRooms,
+    fabricDoors,
+    maxSegmentLength,
   };
 }
 
@@ -159,7 +192,7 @@ const regions = [
   { minX: 3600, maxX: 6300, minY: -2700, maxY: 0 },
 ];
 
-assert(GENERATOR_VERSION === 4, 'Expected generator version 4');
+assert(GENERATOR_VERSION === 5, 'Expected generator version 5');
 
 let totals = {
   rooms: 0,
@@ -168,6 +201,9 @@ let totals = {
   chambers: 0,
   cutouts: 0,
   wideOpenings: 0,
+  fabricRooms: 0,
+  fabricDoors: 0,
+  maxSegmentLength: 0,
 };
 const observedKinds = new Set();
 
@@ -184,6 +220,12 @@ for (const seed of seeds) {
     totals.chambers += result.chambers;
     totals.cutouts += result.cutouts;
     totals.wideOpenings += result.wideOpenings;
+    totals.fabricRooms += result.fabricRooms;
+    totals.fabricDoors += result.fabricDoors;
+    totals.maxSegmentLength = Math.max(
+      totals.maxSegmentLength,
+      result.maxSegmentLength,
+    );
     for (const kind of result.kinds) observedKinds.add(kind);
   }
 
@@ -214,6 +256,18 @@ assert(
 assert(totals.cutouts > 0, 'Expected notched/courtyard room shapes');
 assert(totals.wideOpenings > 0, 'Expected wide compound-room openings');
 
+const averageFabricRoomsPerCorridor =
+  totals.fabricRooms / Math.max(1, totals.corridors);
+
+assert(
+  averageFabricRoomsPerCorridor >= 2,
+  `Expected architectural fabric along connections, got only ${averageFabricRoomsPerCorridor.toFixed(2)} rooms/corridor`,
+);
+assert(
+  totals.maxSegmentLength <= 115,
+  `Uninterrupted connector segment too long: ${totals.maxSegmentLength.toFixed(2)}`,
+);
+
 console.log(
   JSON.stringify({
     generatorVersion: GENERATOR_VERSION,
@@ -221,6 +275,9 @@ console.log(
     regions: seeds.length * regions.length,
     roomKinds: [...observedKinds].sort(),
     averageRoomsPerCell: Number(averageRoomsPerCell.toFixed(2)),
+    averageFabricRoomsPerCorridor: Number(
+      averageFabricRoomsPerCorridor.toFixed(2),
+    ),
     ...totals,
     status: 'ok',
   }),

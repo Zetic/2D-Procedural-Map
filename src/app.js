@@ -98,50 +98,53 @@ function drawRoomCutouts(room) {
 
   withRectTransform(room, () => {
     for (const cutout of cutouts) {
+      const touches =
+        cutout.touches ||
+        (cutout.side >= 0 ? [cutout.side] : []);
+
       const left = cutout.x - cutout.w / 2;
       const right = cutout.x + cutout.w / 2;
       const top = cutout.y - cutout.h / 2;
       const bottom = cutout.y + cutout.h / 2;
       const erase = 8;
 
-      ctx.fillStyle = background;
+      const eraseLeft = touches.includes(2) ? erase : 0;
+      const eraseRight = touches.includes(0) ? erase : 0;
+      const eraseTop = touches.includes(3) ? erase : 0;
+      const eraseBottom = touches.includes(1) ? erase : 0;
 
-      if (cutout.side === 0) {
-        ctx.fillRect(left, top, cutout.w + erase, cutout.h);
-      } else if (cutout.side === 2) {
-        ctx.fillRect(left - erase, top, cutout.w + erase, cutout.h);
-      } else if (cutout.side === 1) {
-        ctx.fillRect(left, top, cutout.w, cutout.h + erase);
-      } else if (cutout.side === 3) {
-        ctx.fillRect(left, top - erase, cutout.w, cutout.h + erase);
-      } else {
-        ctx.fillRect(left, top, cutout.w, cutout.h);
-      }
+      ctx.fillStyle = background;
+      ctx.fillRect(
+        left - eraseLeft,
+        top - eraseTop,
+        cutout.w + eraseLeft + eraseRight,
+        cutout.h + eraseTop + eraseBottom,
+      );
 
       ctx.strokeStyle = wall;
       ctx.lineWidth = 5;
       ctx.lineCap = 'butt';
 
-      if (cutout.side === -1) {
+      if (!touches.length) {
         ctx.strokeRect(left, top, cutout.w, cutout.h);
         continue;
       }
 
       ctx.beginPath();
 
-      if (cutout.side !== 2) {
+      if (!touches.includes(2)) {
         ctx.moveTo(left, top);
         ctx.lineTo(left, bottom);
       }
-      if (cutout.side !== 0) {
+      if (!touches.includes(0)) {
         ctx.moveTo(right, top);
         ctx.lineTo(right, bottom);
       }
-      if (cutout.side !== 3) {
+      if (!touches.includes(3)) {
         ctx.moveTo(left, top);
         ctx.lineTo(right, top);
       }
-      if (cutout.side !== 1) {
+      if (!touches.includes(1)) {
         ctx.moveTo(left, bottom);
         ctx.lineTo(right, bottom);
       }

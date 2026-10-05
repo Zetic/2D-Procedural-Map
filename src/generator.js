@@ -1713,8 +1713,16 @@ function corridorDoor(portal) {
 }
 
 function findSafeRoute(start, goal, obstacles, routeSeed) {
-  const gridRoute = routeAStar(start, goal, obstacles, routeSeed);
+  // Most neighboring growth regions can connect without a full graph search.
+  // Prefer cheap deterministic visibility/dogleg routes and reserve A* for
+  // genuinely blocked dense pockets.
+  const direct = [start, goal];
+  if (pathClear(direct, obstacles)) return direct;
 
+  const dogleg = fallbackRoute(start, goal, obstacles, routeSeed);
+  if (dogleg) return dogleg;
+
+  const gridRoute = routeAStar(start, goal, obstacles, routeSeed);
   if (gridRoute) {
     const candidate = [start];
 
@@ -1732,9 +1740,6 @@ function findSafeRoute(start, goal, obstacles, routeSeed) {
 
     if (pathClear(candidate, obstacles)) return candidate;
   }
-
-  const dogleg = fallbackRoute(start, goal, obstacles, routeSeed);
-  if (dogleg) return dogleg;
 
   return detourAroundObstacles(start, goal, obstacles, routeSeed);
 }

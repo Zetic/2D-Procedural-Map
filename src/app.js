@@ -282,16 +282,19 @@ function render() {
   const corridors = collectCorridors(cells);
   const detailLevel = camera.zoom < 0.24 ? 0 : camera.zoom < 0.42 ? 1 : camera.zoom < 0.72 ? 2 : 3;
 
-  // Architectural connectors are real floor geometry. Their wall shell is
-  // rendered first, then the floor pass cuts open crossings and turn chambers.
+  // All architectural families share the same wall/floor pipeline. Local
+  // growth sites and inter-site fabric therefore read as one accumulated
+  // complex instead of "areas" connected by a visually different road layer.
   for (const corridor of corridors) {
     drawPath(corridor.points, corridor.width + 9, wall);
-    for (const chamber of corridor.chambers) drawRectWall(chamber, 7);
+    for (const chamber of corridor.chambers) drawRectWall(chamber, 5);
   }
 
-  // Dense room complexes use touching rectangles with explicit doorway cuts.
-  // No room is placed by drawing a route through its interior.
   if (detailLevel > 0) {
+    for (const cell of cells) {
+      for (const room of cell.rooms) drawRectWall(room, 5);
+    }
+
     for (const cell of cells) {
       for (const room of cell.rooms) drawRectFloor(room);
     }
@@ -303,16 +306,23 @@ function render() {
   }
 
   if (detailLevel > 0) {
+    // Re-outline both local and connection-fabric rooms identically, then
+    // repaint the short growth spine so it naturally cuts openings through
+    // waystations rather than appearing to pass over them.
     for (const cell of cells) {
       for (const room of cell.rooms) drawRectWall(room, 5);
+    }
+    for (const corridor of corridors) {
+      for (const chamber of corridor.chambers) drawRectWall(chamber, 5);
+      drawPath(corridor.points, corridor.width, corridor.color);
     }
 
     for (const cell of cells) {
       for (const room of cell.rooms) drawRoomDetails(room, detailLevel);
     }
 
-    // The hidden macro graph is rendered as an architectural fabric: short
-    // halls repeatedly open into waystations, connector rooms, and annexes.
+    // Required connectivity is expressed with the same architectural fabric:
+    // short passages repeatedly expand into rooms, waystations, and annexes.
     for (const corridor of corridors) {
       for (const chamber of corridor.chambers) {
         drawRoomDetails(chamber, detailLevel);

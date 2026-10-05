@@ -1,9 +1,9 @@
-export const CELL_SIZE = 820;
+export const CELL_SIZE = 760;
 export const QUERY_HALO = 2;
-export const GENERATOR_VERSION = 4;
+export const GENERATOR_VERSION = 5;
 
 const TAU = Math.PI * 2;
-const MAX_COMPLEX_RADIUS = 304;
+const MAX_COMPLEX_RADIUS = 315;
 const ROUTE_STEP = 42;
 const WALL = '#665947';
 const FLOOR_PALETTES = [
@@ -84,15 +84,27 @@ function seededRng(seedValue) {
 }
 
 function choosePalette(seed, cx, cy) {
-  const rare = hash01(seed, cx, cy, 701);
+  // Most of the world stays in the common cream family. Rare color regions
+  // are correlated over several structural cells so color does not expose the
+  // indexing lattice as a checkerboard of separate islands.
+  const zoneX = Math.floor(cx / 3);
+  const zoneY = Math.floor(cy / 3);
+  const rareZone = hash01(seed, zoneX, zoneY, 701);
+
   let index;
-  if (rare < 0.80) index = Math.floor(hash01(seed, cx, cy, 702) * 5);
-  else index = 5 + Math.floor(hash01(seed, cx, cy, 703) * (FLOOR_PALETTES.length - 5));
+  if (rareZone < 0.11) {
+    index = 5 + Math.floor(
+      hash01(seed, zoneX, zoneY, 703) * (FLOOR_PALETTES.length - 5),
+    );
+  } else {
+    index = Math.floor(hash01(seed, cx, cy, 702) * 5);
+  }
+
   return FLOOR_PALETTES[Math.min(index, FLOOR_PALETTES.length - 1)];
 }
 
 function anchorFor(seed, cx, cy) {
-  const jitter = CELL_SIZE * 0.10;
+  const jitter = CELL_SIZE * 0.07;
   return {
     x: cx * CELL_SIZE + CELL_SIZE * 0.5 + hashSigned(seed, cx, cy, 11) * jitter,
     y: cy * CELL_SIZE + CELL_SIZE * 0.5 + hashSigned(seed, cx, cy, 12) * jitter,
@@ -104,7 +116,11 @@ function parentFor(seed, cx, cy) {
   if (cx === 0) return [0, cy - sign(cy)];
   if (cy === 0) return [cx - sign(cx), 0];
 
-  if (hash01(seed, cx, cy, 21) < 0.5) return [cx - sign(cx), cy];
+  // Diagonal parents are common. The hidden connectivity topology therefore
+  // does not reduce to a visible Manhattan road lattice.
+  const roll = hash01(seed, cx, cy, 21);
+  if (roll < 0.56) return [cx - sign(cx), cy - sign(cy)];
+  if (roll < 0.78) return [cx - sign(cx), cy];
   return [cx, cy - sign(cy)];
 }
 
@@ -122,14 +138,22 @@ function optionalNeighborEdges(seed, cx, cy) {
     [cx, cy + 1, 32],
     [cx + 1, cy + 1, 33],
     [cx + 1, cy - 1, 34],
+    [cx + 2, cy + 1, 35],
+    [cx + 1, cy + 2, 36],
+    [cx + 2, cy - 1, 37],
+    [cx + 1, cy - 2, 38],
   ];
 
   for (const [nx, ny, salt] of candidates) {
     if (isTreeEdge(seed, cx, cy, nx, ny)) continue;
     const edge = canonicalEdgeKey(cx, cy, nx, ny);
     const chance = ((hashString(edge) ^ seed ^ salt) >>> 0) / 4294967296;
+    const span = Math.max(Math.abs(nx - cx), Math.abs(ny - cy));
     const rankDelta = Math.abs(distanceRank(nx, ny) - distanceRank(cx, cy));
-    const threshold = rankDelta === 0 ? 0.18 : 0.08;
+    const threshold =
+      span > 1 ? 0.032 :
+      rankDelta === 0 ? 0.22 : 0.11;
+
     if (chance < threshold) output.push([nx, ny]);
   }
   return output;

@@ -1030,9 +1030,10 @@ function neckClear(complex, portal, outside, width) {
   return true;
 }
 
-function chooseClearPortal(complex, target, salt, width) {
+function clearPortalOptions(complex, target, salt, width, maxOptions = 6) {
   const candidates = externalPortalCandidates(complex, target, salt);
   const clearance = width * 0.5 + 8;
+  const options = [];
 
   for (const portal of candidates) {
     const localOutside = pointOutsideRoom(complex, portal, clearance);
@@ -1042,19 +1043,25 @@ function chooseClearPortal(complex, target, salt, width) {
       y: localOutside.y + portal.normal.y * runway,
     };
 
-    // The longer probe must be clear, but the actual route begins immediately
-    // outside the room. This avoids overshooting narrow gaps when two dense
-    // complexes already nearly touch.
     if (neckClear(complex, portal, probe, width)) {
-      return { portal, outside: localOutside };
+      options.push({ portal, outside: localOutside });
+      if (options.length >= maxOptions) break;
     }
   }
 
-  const portal = candidates[0];
-  return {
-    portal,
-    outside: pointOutsideRoom(complex, portal, clearance),
-  };
+  if (!options.length && candidates.length) {
+    const portal = candidates[0];
+    options.push({
+      portal,
+      outside: pointOutsideRoom(complex, portal, clearance),
+    });
+  }
+
+  return options;
+}
+
+function chooseClearPortal(complex, target, salt, width) {
+  return clearPortalOptions(complex, target, salt, width, 1)[0];
 }
 
 function segmentCircleDistanceSq(ax, ay, bx, by, cx, cy) {

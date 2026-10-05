@@ -303,15 +303,15 @@ function render() {
       for (const room of cell.rooms) drawRectWall(room, 5);
     }
 
-    // Notches and interior voids are subtracted after the outer wall pass.
-    // Exterior-facing cutouts erase the corresponding wall section, producing
-    // L/U-like room silhouettes rather than only rectangular boxes.
-    for (const cell of cells) {
-      for (const room of cell.rooms) drawRoomCutouts(room);
-    }
-
     for (const cell of cells) {
       for (const room of cell.rooms) drawRoomDetails(room, detailLevel);
+    }
+
+    // Notches and interior voids are subtracted last so they erase both the
+    // outer wall and any interior detail that would otherwise cross the void.
+    // Exterior-facing cutouts produce L/U-like room silhouettes.
+    for (const cell of cells) {
+      for (const room of cell.rooms) drawRoomCutouts(room);
     }
 
     // Internal room doors are generated from the growth adjacency graph.

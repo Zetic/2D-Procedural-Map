@@ -4,10 +4,10 @@ export const GENERATOR_VERSION = 6;
 
 const TAU = Math.PI * 2;
 const SITE_GRID = 420;
-const SITE_MIN_DISTANCE = 460;
+const SITE_MIN_DISTANCE = 500;
 const SITE_NEIGHBOR_RADIUS = 3;
 const SITE_PARENT_RADIUS = 4;
-const MAX_COMPLEX_RADIUS = 190;
+const MAX_COMPLEX_RADIUS = 175;
 const ROUTE_STEP = 64;
 const WALL = '#665947';
 const FLOOR_PALETTES = [

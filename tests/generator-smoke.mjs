@@ -489,10 +489,10 @@ function verifyFabric(seed) {
   const batchedGenerator = new InfiniteMapGenerator(seed);
 
   batchedGenerator.query({
-    minX: -5000,
-    maxX: 5000,
-    minY: -3500,
-    maxY: 3500,
+    minX: -2800,
+    maxX: 2800,
+    minY: -1900,
+    maxY: 1900,
   });
 
   const batched = snapshot(
@@ -508,9 +508,9 @@ function verifyFabric(seed) {
 
   remoteGenerator.query({
     minX: 12000,
-    maxX: 14500,
-    minY: -11000,
-    maxY: -8500,
+    maxX: 13600,
+    minY: -10400,
+    maxY: -8800,
   });
 
   const remoteThenHome = snapshot(

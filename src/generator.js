@@ -990,10 +990,19 @@ function externalPortalCandidates(complex, target, salt) {
   return fallback;
 }
 
-function pointOutsidePortal(portal, clearance) {
-  // Leave the selected wall by only a short architectural neck. Routing no
-  // longer jumps to the outside of a giant district-radius obstacle.
-  const t = Math.max(10, clearance + 6);
+function pointOutsideRoom(complex, portal, clearance) {
+  // Move only far enough to clear the selected room's local footprint. This
+  // avoids the old district-radius "spoke" without letting the routed center
+  // line immediately clip back through the room it just exited.
+  const room = complex.rooms[portal.roomIndex];
+  const vx = portal.x - room.x;
+  const vy = portal.y - room.y;
+  const radius = Math.hypot(room.w, room.h) * 0.5 + clearance;
+  const b = vx * portal.normal.x + vy * portal.normal.y;
+  const c = vx * vx + vy * vy - radius * radius;
+  const disc = Math.max(0, b * b - c);
+  const t = Math.max(10, -b + Math.sqrt(disc) + 4);
+
   return {
     x: portal.x + portal.normal.x * t,
     y: portal.y + portal.normal.y * t,
@@ -1026,14 +1035,14 @@ function chooseClearPortal(complex, target, salt, width) {
   const clearance = width * 0.5 + 8;
 
   for (const portal of candidates) {
-    const outside = pointOutsidePortal(portal, clearance);
+    const outside = pointOutsideRoom(complex, portal, clearance);
     if (neckClear(complex, portal, outside, width)) return { portal, outside };
   }
 
   const portal = candidates[0];
   return {
     portal,
-    outside: pointOutsidePortal(portal, clearance),
+    outside: pointOutsideRoom(complex, portal, clearance),
   };
 }
 

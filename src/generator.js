@@ -2195,15 +2195,15 @@ function makeTransitionRoom(
   );
 
   const w = clamp(
-    spacing * (0.54 + rng() * 0.12),
-    44,
-    72,
+    spacing * (0.64 + rng() * 0.16),
+    46,
+    86,
   );
 
   const h = clamp(
-    spacing * (0.42 + rng() * 0.12),
-    38,
-    62,
+    spacing * (0.50 + rng() * 0.14),
+    40,
+    70,
   );
 
   const shapeRoll = rng();
@@ -2346,16 +2346,18 @@ function connectionBetween(
   );
 
   const width =
-    gap < 28
-      ? 30
-      : primary
-        ? 18 + (hashString(key) % 9)
-        : 16 + (hashString(key + ':loop') % 8);
+    gap < 24
+      ? 34
+      : gap < 52
+        ? 24 + (hashString(key) % 9)
+        : primary
+          ? 21 + (hashString(key) % 10)
+          : 18 + (hashString(key + ':loop') % 9);
 
   const transitionCount =
-    gap > 128
+    gap > 62
       ? clamp(
-          Math.floor(gap / 78),
+          Math.ceil(gap / 78) - 1,
           1,
           3,
         )

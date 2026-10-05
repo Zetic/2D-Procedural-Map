@@ -1466,98 +1466,130 @@ function fallbackRoute(start, goal, obstacles, routeSeed) {
   return null;
 }
 
-function pathIntersectionCount(path, obstacles) {
-  let count = 0;
+function firstSegmentIntersection(a, b, obstacles) {
+  for (let obstacleIndex = 0; obstacleIndex < obstacles.length; obstacleIndex++) {
+    const obstacle = obstacles[obstacleIndex];
 
-  for (let i = 0; i < path.length - 1; i++) {
-    const a = path[i];
-    const b = path[i + 1];
-
-    for (const obstacle of obstacles) {
-      if (
-        segmentCircleDistanceSq(
-          a.x,
-          a.y,
-          b.x,
-          b.y,
-          obstacle.x,
-          obstacle.y,
-        ) < obstacle.r * obstacle.r
-      ) {
-        count++;
-      }
-    }
-  }
-
-  return count;
-}
-
-function firstPathIntersection(path, obstacles) {
-  for (let i = 0; i < path.length - 1; i++) {
-    const a = path[i];
-    const b = path[i + 1];
-
-    for (let obstacleIndex = 0; obstacleIndex < obstacles.length; obstacleIndex++) {
-      const obstacle = obstacles[obstacleIndex];
-      if (
-        segmentCircleDistanceSq(
-          a.x,
-          a.y,
-          b.x,
-          b.y,
-          obstacle.x,
-          obstacle.y,
-        ) < obstacle.r * obstacle.r
-      ) {
-        return { segmentIndex: i, obstacleIndex, obstacle };
-      }
+    if (
+      segmentCircleDistanceSq(
+        a.x,
+        a.y,
+        b.x,
+        b.y,
+        obstacle.x,
+        obstacle.y,
+      ) < obstacle.r * obstacle.r
+    ) {
+      return { obstacleIndex, obstacle };
     }
   }
 
   return null;
 }
 
+function localDetourScore(points, obstacles, ignoredObstacleIndex) {
+  let score = 0;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+
+    for (let obstacleIndex = 0; obstacleIndex < obstacles.length; obstacleIndex++) {
+      if (obstacleIndex === ignoredObstacleIndex) continue;
+
+      const obstacle = obstacles[obstacleIndex];
+
+      if (
+        segmentCircleDistanceSq(
+          a.x,
+          a.y,
+          b.x,
+          b.y,
+          obstacle.x,
+          obstacle.y,
+        ) < obstacle.r * obstacle.r
+      ) {
+        score += 1;
+      }
+    }
+  }
+
+  return score;
+}
+
 function detourAroundObstacles(start, goal, obstacles, routeSeed) {
-  let path = [start, goal];
+  const output = [start];
+  const stack = [{ a: start, b: goal, depth: 0, salt: 0 }];
+  let guard = 0;
 
-  for (let iteration = 0; iteration < 72; iteration++) {
-    const hit = firstPathIntersection(path, obstacles);
-    if (!hit) return simplifyPath(path);
+  while (stack.length && guard++ < 420) {
+    const segment = stack.pop();
+    const hit = firstSegmentIntersection(segment.a, segment.b, obstacles);
 
-    const a = path[hit.segmentIndex];
-    const b = path[hit.segmentIndex + 1];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
+    if (!hit) {
+      const last = output[output.length - 1];
+      if (Math.hypot(segment.b.x - last.x, segment.b.y - last.y) > 1) {
+        output.push(segment.b);
+      }
+      continue;
+    }
+
+    if (segment.depth >= 16) return null;
+
+    const dx = segment.b.x - segment.a.x;
+    const dy = segment.b.y - segment.a.y;
     const len = Math.hypot(dx, dy) || 1;
     const ux = dx / len;
     const uy = dy / len;
     const px = -uy;
     const py = ux;
-    const clearance = hit.obstacle.r + ROUTE_STEP * 0.82;
-    const tangentReach = clearance * 0.92;
+
+    const depthScale = 1 + segment.depth * 0.08;
+    const clearance =
+      (hit.obstacle.r + ROUTE_STEP * 0.92) * depthScale;
+    const tangentReach = clearance * 1.16;
 
     const candidates = [];
+
     for (const side of [-1, 1]) {
       const before = {
-        x: hit.obstacle.x - ux * tangentReach + px * clearance * side,
-        y: hit.obstacle.y - uy * tangentReach + py * clearance * side,
-      };
-      const after = {
-        x: hit.obstacle.x + ux * tangentReach + px * clearance * side,
-        y: hit.obstacle.y + uy * tangentReach + py * clearance * side,
+        x:
+          hit.obstacle.x -
+          ux * tangentReach +
+          px * clearance * side,
+        y:
+          hit.obstacle.y -
+          uy * tangentReach +
+          py * clearance * side,
       };
 
-      const candidate = [
-        ...path.slice(0, hit.segmentIndex + 1),
-        before,
-        after,
-        ...path.slice(hit.segmentIndex + 1),
-      ];
+      const after = {
+        x:
+          hit.obstacle.x +
+          ux * tangentReach +
+          px * clearance * side,
+        y:
+          hit.obstacle.y +
+          uy * tangentReach +
+          py * clearance * side,
+      };
+
+      const points = [segment.a, before, after, segment.b];
 
       candidates.push({
-        path: candidate,
-        score: pathIntersectionCount(candidate, obstacles),
-        tie: hashInt(routeSeed, iteration, hit.obstacleIndex, side < 0 ? 1701 : 1702),
+        before,
+        after,
+        score: localDetourScore(
+          points,
+          obstacles,
+          hit.obstacleIndex,
+        ),
+        tie: hashInt(
+          routeSeed,
+          segment.depth * 97 + segment.salt,
+          hit.obstacleIndex,
+          side < 0 ? 1701 : 1702,
+        ),
       });
     }
 
@@ -1566,10 +1598,35 @@ function detourAroundObstacles(start, goal, obstacles, routeSeed) {
       return left.tie - right.tie;
     });
 
-    path = candidates[0].path;
+    const chosen = candidates[0];
+    const nextDepth = segment.depth + 1;
+    const nextSalt = segment.salt + 1;
+
+    // Stack is LIFO, so push the three replacement segments in reverse order.
+    stack.push({
+      a: chosen.after,
+      b: segment.b,
+      depth: nextDepth,
+      salt: nextSalt + 2,
+    });
+    stack.push({
+      a: chosen.before,
+      b: chosen.after,
+      depth: nextDepth,
+      salt: nextSalt + 1,
+    });
+    stack.push({
+      a: segment.a,
+      b: chosen.before,
+      depth: nextDepth,
+      salt: nextSalt,
+    });
   }
 
-  return pathClear(path, obstacles) ? simplifyPath(path) : null;
+  if (stack.length) return null;
+
+  const simplified = simplifyPath(output);
+  return pathClear(simplified, obstacles) ? simplified : null;
 }
 
 function chamberClear(chamber, obstacles, corridorWidth) {

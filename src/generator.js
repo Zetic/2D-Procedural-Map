@@ -1822,6 +1822,30 @@ function organicizeRoute(points, obstacles, routeSeed) {
   return simplifyPath(output);
 }
 
+function appendSegmentedPoint(output, point, maxStep = 78) {
+  const last = output[output.length - 1];
+  if (!last) {
+    output.push({ ...point });
+    return;
+  }
+
+  const dx = point.x - last.x;
+  const dy = point.y - last.y;
+  const len = Math.hypot(dx, dy);
+
+  if (len <= 1) return;
+
+  const pieces = Math.max(1, Math.ceil(len / maxStep));
+
+  for (let i = 1; i <= pieces; i++) {
+    const t = i / pieces;
+    output.push({
+      x: last.x + dx * t,
+      y: last.y + dy * t,
+    });
+  }
+}
+
 function resamplePath(points, maxStep, routeSeed) {
   if (!points.length) return [];
   const output = [{ ...points[0] }];
@@ -2315,18 +2339,28 @@ export class InfiniteMapGenerator {
       obstacles,
     );
 
-    const points = [sourcePortal];
+    const points = [{ x: sourcePortal.x, y: sourcePortal.y }];
+
+    appendSegmentedPoint(
+      points,
+      chosen.sourceExit.localOutside,
+      72,
+    );
+
     for (const point of fabric.spine) {
-      const last = points[points.length - 1];
-      if (Math.hypot(point.x - last.x, point.y - last.y) > 1) {
-        points.push(point);
-      }
+      appendSegmentedPoint(points, point, 84);
     }
 
-    const last = points[points.length - 1];
-    if (Math.hypot(targetPortal.x - last.x, targetPortal.y - last.y) > 1) {
-      points.push(targetPortal);
-    }
+    appendSegmentedPoint(
+      points,
+      chosen.targetExit.localOutside,
+      72,
+    );
+    appendSegmentedPoint(
+      points,
+      { x: targetPortal.x, y: targetPortal.y },
+      72,
+    );
 
     const corridor = {
       edgeKey,

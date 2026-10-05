@@ -1035,14 +1035,29 @@ function chooseClearPortal(complex, target, salt, width) {
   const clearance = width * 0.5 + 8;
 
   for (const portal of candidates) {
-    const outside = pointOutsideRoom(complex, portal, clearance);
-    if (neckClear(complex, portal, outside, width)) return { portal, outside };
+    const localOutside = pointOutsideRoom(complex, portal, clearance);
+    const runway = 62 + hash01(salt, portal.roomIndex, portal.side, 1181) * 42;
+    const outside = {
+      x: localOutside.x + portal.normal.x * runway,
+      y: localOutside.y + portal.normal.y * runway,
+    };
+
+    // Require an actual outward approach lane, not merely a clear doorway.
+    // This prevents a selected portal from being boxed in behind another room
+    // and forcing the macro connection to fall back to a straight cut-through.
+    if (neckClear(complex, portal, outside, width)) {
+      return { portal, outside };
+    }
   }
 
   const portal = candidates[0];
+  const localOutside = pointOutsideRoom(complex, portal, clearance);
   return {
     portal,
-    outside: pointOutsideRoom(complex, portal, clearance),
+    outside: {
+      x: localOutside.x + portal.normal.x * 84,
+      y: localOutside.y + portal.normal.y * 84,
+    },
   };
 }
 
@@ -1189,7 +1204,7 @@ function routeAStar(start, goal, obstacles, routeSeed) {
   const rawSY = Math.round(start.y / ROUTE_STEP);
   const rawGX = Math.round(goal.x / ROUTE_STEP);
   const rawGY = Math.round(goal.y / ROUTE_STEP);
-  const margin = 20;
+  const margin = 28;
 
   const minX = Math.min(rawSX, rawGX) - margin;
   const maxX = Math.max(rawSX, rawGX) + margin;

@@ -2335,10 +2335,14 @@ export class InfiniteMapGenerator {
   }
 
   getObstacleRooms(ax, ay, bx, by, corridorWidth) {
-    const minX = Math.min(ax, bx) - 1;
-    const maxX = Math.max(ax, bx) + 1;
-    const minY = Math.min(ay, by) - 1;
-    const maxY = Math.max(ay, by) + 1;
+    // Candidate sites can be heavily jittered inside their indexing buckets.
+    // Include several rings around the edge bounding box so nearby architecture
+    // that visually reaches into the route is always treated as occupied.
+    const obstacleHalo = 3;
+    const minX = Math.min(ax, bx) - obstacleHalo;
+    const maxX = Math.max(ax, bx) + obstacleHalo;
+    const minY = Math.min(ay, by) - obstacleHalo;
+    const maxY = Math.max(ay, by) + obstacleHalo;
     const obstacles = [];
 
     for (let cy = minY; cy <= maxY; cy++) {

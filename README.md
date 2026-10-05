@@ -2,153 +2,136 @@
 
 A deterministic, exploration-order-independent infinite 2D architectural map for the browser.
 
-Generator version 7 replaces the previous **local complex + connector** model with one continuous architectural accretion system.
+Generator version 8 keeps the continuous accretion introduced in v7, but reconstructs that floor mass into readable architecture instead of rendering it like a cave-shaped occupancy mask.
 
-## Generator v7: one architectural fabric
+## Generator v8: continuous mass with actual rooms
 
-Visible generation no longer contains separate concepts for:
+The visible world still has no separate concepts for:
 
 - source complexes
 - destination complexes
-- corridors between complexes
-- connector rooms
-- connector-specific rendering
-- per-site door layers
+- connector corridors
+- connector-specific rooms
+- connector-specific doors
 
-The renderer receives only:
+Global connectivity remains hidden inside one continuous architectural fabric.
 
-- floor mass
-- exterior boundary walls
-- architectural details
+The major v8 change is that overlapping growth primitives now carry stable **space identities**. The floor is still unioned into one connected mass, but adjacent spaces retain meaningful internal boundaries.
 
-That means required global connectivity is buried inside the same geometry as ordinary rooms and branches.
+That produces:
 
-## How the world grows
+- compound rooms formed from several overlapping primitives
+- retained walls between genuinely different rooms
+- deterministic door/opening gaps in shared walls
+- large chambers with broad openings
+- smaller rooms with narrower doors
+- annexes and branch rooms that read as architecture rather than path decoration
 
-A sparse hidden macro tree still guarantees that every region ultimately has a finite topological path toward the origin, but that tree is not rendered directly.
+## No more visible raster striping
 
-Each hidden edge is converted into a dense sequence of overlapping architectural events:
+The occupancy raster is now an internal generation representation only.
 
-- ordinary rooms
+Rendering changes include:
+
+- smaller 15-world-unit occupancy cells
+- simplified exterior contour paths instead of raw staircase edges
+- diagonal contour simplification for rotated architecture
+- screen-space floor bleed to eliminate subpixel seams between raster rows
+- sparse structured partitions and columns generated from final owned spaces rather than every hidden growth primitive
+
+The horizontal scanline pattern from v7 is therefore no longer part of the intended rendered output.
+
+## Exterior silhouette vs interior topology
+
+V7 rendered almost exclusively the union's exterior boundary. That removed visible connectors, but also erased most room semantics.
+
+V8 separates two things:
+
+1. **Exterior floor union** — overlapping growth events form irregular compound architecture.
+2. **Interior space ownership** — deterministic ownership partitions that mass back into readable rooms.
+
+When two spaces meet, their shared boundary receives one or more deterministic openings. Very short boundaries may be removed entirely, making the spaces one visually compound room.
+
+This preserves the desired sprawling silhouette while restoring a map-like internal floor plan.
+
+## Continuous accretion
+
+A sparse hidden parent tree still provides the formal global connectivity guarantee, but it is never rendered as a road layer.
+
+Each hidden obligation is expanded into ordinary overlapping architectural events:
+
+- rooms
 - transverse rooms
 - galleries
 - large chambers
-- side annexes
-- multi-step branches
+- annexes
+- side branches
 - branch forks
-- occasional non-rectangular spaces
-- internal partitions
-- column fields
+- occasional elliptical features
 
-The architectural events deliberately overlap before rasterization. Overlap is treated as a **union of floor space**, not as two rooms incorrectly occupying the same floor.
+Primary events overlap physically, so connectivity is represented by normal occupied floor area.
 
-Because only the union boundary is rendered, the original primitives disappear into compound shapes. Internal growth events can merge, cross, and reconnect without producing visual overpasses or stacked geometry.
+Optional links add loops and cause independently generated growth to merge.
 
-## Continuous accretion instead of visible connections
+## Architectural variation
 
-Primary growth events are sampled closely enough that consecutive spaces physically overlap.
+Smooth deterministic world-space fields vary:
 
-There is no fallback operation that draws a long narrow line between two distant architectural islands.
-
-A hidden connectivity obligation therefore becomes:
-
-```text
-room → chamber → branching rooms → compound mass → merge
-```
-
-rather than:
-
-```text
-complex ───────── corridor ───────── complex
-```
-
-Optional cross-links add local cycles and make independently growing branches merge into the same floor mass.
-
-## Density and macro variation
-
-Version 7 uses smooth deterministic world-space fields to vary:
-
-- architectural density
+- density
 - openness
 - room scale
 - branch frequency
 - chamber frequency
-- turning frequency
-- color regions
+- turn frequency
 
-These fields vary over much larger distances than streaming chunks, so dense and sparse areas transition gradually rather than changing at chunk boundaries.
+Growth families also receive stable floor palettes. Most remain within the cream/tan family used by the reference, while occasional muted pink, blue, green, or brown regions persist as architectural sections rather than horizontal world-space color bands.
 
-The current target density is intentionally broad. Sampled seeds typically occupy roughly 43–58% of a large world region, leaving irregular negative space while maintaining one dominant connected architectural mass.
+## Streaming
 
-## Compound room shapes
+Streaming chunks are 720 world units wide. The raster cell size is 15 world units.
 
-Room primitives are not rendered independently.
+Chunks are query/cache units only. They do not control:
 
-They are raster-unioned at 20-world-unit resolution, then the exterior boundary is extracted from the resulting occupancy field.
-
-This produces:
-
-- stepped compound rooms
-- irregular wings
-- broad merged chambers
-- branching room masses
-- natural junctions
-- merged crossings
-- asymmetrical silhouettes
-
-Large primitives can additionally receive partitions and column fields.
-
-## Streaming and determinism
-
-Streaming chunks are 720 world units wide and exist only for caching/querying.
-
-They do not determine:
-
-- where architecture starts
-- room ownership
+- room placement
+- space ownership
 - connectivity
-- color regions
-- branching
-- style changes
+- style
+- color families
+- growth direction
 
-Every chunk is regenerated from deterministic world-space growth primitives plus a one-cell occupancy halo, so exploration order does not affect chunk-edge walls or layout.
+Each chunk is regenerated from deterministic world-space growth with a raster halo. Exploration direction therefore cannot alter boundaries, rooms, openings, or details.
 
-All decisions come from:
+## Connectivity
 
-`generator version + seed + stable world coordinates + feature salt`
+Every hidden macro coordinate has a deterministic parent that strictly decreases Manhattan rank toward the root.
 
-Generator version 7 is part of the hash namespace.
+Consecutive primary growth events physically overlap. Branches originate from already-connected architecture. Shared space boundaries contain deterministic door/opening gaps.
 
-## Connectivity guarantee
+There is no separate corridor fallback.
 
-Every hidden macro cell has a parent that strictly decreases Manhattan rank toward the origin.
+## Validation
 
-Primary architectural events along each parent edge overlap physically, so the hidden tree is represented by ordinary connected floor mass rather than a separate corridor network.
+The v8 smoke suite currently verifies:
 
-Side branches originate from already-connected architectural events. Optional links only add loops.
-
-Therefore every generated architectural family is attached to the same global connected structure.
-
-## Current validation snapshot
-
-The exact smoke suite currently verifies:
-
-- generator version 7
-- JavaScript syntax for generator, renderer, and tests
-- strict parent-rank decrease toward the origin
-- no exposed `rooms`, `corridors`, or `doors` connection layers in rendered chunk data
-- exploration-order determinism after generating a remote region
-- streaming chunk/raster alignment
+- generator version 8
+- generator/app/test JavaScript syntax
+- strict hidden parent-rank decrease
+- no exposed `rooms`, `corridors`, or `doors` connector layers
+- exact exploration-order determinism
+- one dominant connected occupied mass
 - substantial macro density variation
-- one dominant continuous occupied mass inside large sampled crops
+- hundreds of readable owned spaces in sampled crops
+- substantial internal room-wall geometry
+- simplified diagonal exterior contour segments
+- multiple stable architectural floor tones
 
 Current three-seed samples:
 
-- `backrooms-71`: ~57.8% sampled density, ~98.3% of occupied crop cells in the largest connected mass
-- `alpha`: ~51.8% sampled density, ~99.97% in the largest connected mass
-- `reference`: ~49.9% sampled density, ~99.88% in the largest connected mass
+- `backrooms-71`: 48.9% average sampled density, 99.83% of occupied crop in the largest connected mass, 884 sampled spaces
+- `alpha`: 69.4% density, 99.63% in the largest connected mass, 904 sampled spaces
+- `reference`: 58.9% density, 99.99% in the largest connected mass, 883 sampled spaces
 
-An additional 20-seed stress pass completed without generation failures, with sampled densities roughly 42.9–58.3%.
+Representative normal viewports generate in roughly 0.35–0.45 seconds in connector-side validation. A very wide low-zoom viewport is roughly 1.8 seconds before browser rendering and benefits from chunk caching while panning.
 
 ## Controls
 

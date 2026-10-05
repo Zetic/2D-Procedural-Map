@@ -687,15 +687,20 @@ function roomForSite(seed, sx, sy) {
     aspect = 0.82 + rng() * 1.15;
   }
 
+  const sizeFraction =
+    major
+      ? 0.98 + rng() * 0.02
+      : kind === 'cell'
+        ? 0.55 + rng() * 0.17
+        : kind === 'gallery'
+          ? 0.82 + rng() * 0.14
+          : kind === 'suite'
+            ? 0.76 + rng() * 0.16
+            : 0.72 + rng() * 0.18;
+
   const targetRadius =
     maxRadius *
-    (
-      major
-        ? 0.98 + rng() * 0.02
-        : kind === 'cell'
-          ? 0.68 + rng() * 0.14
-          : 0.91 + rng() * 0.08
-    ) *
+    sizeFraction *
     sparse;
 
   let w;

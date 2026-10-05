@@ -1690,43 +1690,132 @@ function makeClusterChildRoom(
       5411 + attempt,
     ) *
     (
-      0.18 +
-      depth * 0.075
+      0.16 +
+      depth * 0.065
     );
 
-  const direction =
+  const desiredDirection =
     heading + turn;
+
+  const edgeChoices = [];
+
+  for (
+    let edgeIndex = 0;
+    edgeIndex < parentRoom.vertices.length;
+    edgeIndex++
+  ) {
+    const a =
+      parentRoom.vertices[edgeIndex];
+
+    const b =
+      parentRoom.vertices[
+        (edgeIndex + 1) %
+          parentRoom.vertices.length
+      ];
+
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length =
+      Math.hypot(dx, dy);
+
+    if (length < 18) continue;
+
+    const midpoint = {
+      x: (a.x + b.x) * 0.5,
+      y: (a.y + b.y) * 0.5,
+    };
+
+    let nx = -dy / length;
+    let ny = dx / length;
+
+    if (
+      pointInPolygon(
+        {
+          x: midpoint.x + nx * 3,
+          y: midpoint.y + ny * 3,
+        },
+        parentRoom.vertices,
+      )
+    ) {
+      nx = -nx;
+      ny = -ny;
+    }
+
+    const normalAngle =
+      Math.atan2(ny, nx);
+
+    let delta =
+      normalAngle -
+      desiredDirection;
+
+    while (delta > Math.PI) {
+      delta -= TAU;
+    }
+
+    while (delta < -Math.PI) {
+      delta += TAU;
+    }
+
+    edgeChoices.push({
+      edgeIndex,
+      a,
+      b,
+      midpoint,
+      nx,
+      ny,
+      normalAngle,
+      edgeAngle:
+        Math.atan2(dy, dx),
+      score:
+        Math.abs(delta) +
+        hash01(
+          seed,
+          sx * 109 + edgeIndex,
+          sy * 113 + depth,
+          5417,
+        ) *
+          0.18,
+    });
+  }
+
+  if (!edgeChoices.length) {
+    return null;
+  }
+
+  edgeChoices.sort(
+    (left, right) =>
+      left.score - right.score,
+  );
+
+  const attachment =
+    edgeChoices[
+      Math.min(
+        attempt,
+        edgeChoices.length - 1,
+      )
+    ];
+
+  const direction =
+    attachment.normalAngle;
 
   const angle =
     Math.round(
-      (
-        direction +
-        hashSigned(
-          seed,
-          sx,
-          sy,
-          5421 +
-            branchIndex * 17 +
-            depth * 3 +
-            attempt,
-        ) *
-          0.22
-      ) /
+      attachment.edgeAngle /
         (Math.PI / 12),
     ) *
     (Math.PI / 12);
 
   const shapeRoll = rng();
 
+  // Portal-grown children primarily use flat attachment faces. Irregular
+  // silhouettes come from the full cluster, not by intersecting the parent.
   const shape =
     kind === 'cluster-chamber' &&
-    shapeRoll < 0.22
+    shapeRoll < 0.24
       ? 'chamfer'
-      : shapeRoll < 0.14
-        ? 'l'
-        : shapeRoll < 0.26
-          ? 'step'
-          : 'rect';
+      : shapeRoll < 0.10
+        ? 'step'
+        : 'rect';
 
   const variant =
     hashInt(
@@ -1743,16 +1832,6 @@ function makeClusterChildRoom(
       h,
       variant,
     );
-
-  const sourcePortal =
-    rayToRoomBoundary(
-      parentRoom,
-      direction,
-    );
-
-  if (!sourcePortal) {
-    return null;
-  }
 
   const provisional = {
     x: 0,
@@ -1777,14 +1856,6 @@ function makeClusterChildRoom(
     return null;
   }
 
-  const parentExtent =
-    Math.hypot(
-      sourcePortal.x -
-        parentRoom.x,
-      sourcePortal.y -
-        parentRoom.y,
-    );
-
   const childExtent =
     Math.hypot(
       reversePortal.x,
@@ -1792,22 +1863,17 @@ function makeClusterChildRoom(
     );
 
   const gap =
-    5 + rng() * 13;
-
-  const centerDistance =
-    parentExtent +
-    childExtent +
-    gap;
+    1.5 + rng() * 5.5;
 
   const x =
-    parentRoom.x +
-    Math.cos(direction) *
-      centerDistance;
+    attachment.midpoint.x +
+    attachment.nx *
+      (childExtent + gap);
 
   const y =
-    parentRoom.y +
-    Math.sin(direction) *
-      centerDistance;
+    attachment.midpoint.y +
+    attachment.ny *
+      (childExtent + gap);
 
   const vertices =
     transformVertices(

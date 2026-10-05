@@ -1,9 +1,9 @@
 export const GENERATOR_VERSION = 8;
 
-export const FABRIC_CELL = 12;
+export const FABRIC_CELL = 15;
 export const FABRIC_CHUNK = 720;
 export const MACRO_SIZE = 860;
-export const QUERY_HALO = FABRIC_CHUNK;
+export const QUERY_HALO = FABRIC_CELL * 2;
 
 const TAU = Math.PI * 2;
 const WALL = '#625747';

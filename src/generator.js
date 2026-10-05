@@ -1,9 +1,9 @@
-export const CELL_SIZE = 900;
+export const CELL_SIZE = 820;
 export const QUERY_HALO = 2;
-export const GENERATOR_VERSION = 3;
+export const GENERATOR_VERSION = 4;
 
 const TAU = Math.PI * 2;
-const MAX_COMPLEX_RADIUS = 252;
+const MAX_COMPLEX_RADIUS = 292;
 const ROUTE_STEP = 42;
 const WALL = '#665947';
 const FLOOR_PALETTES = [
@@ -92,7 +92,7 @@ function choosePalette(seed, cx, cy) {
 }
 
 function anchorFor(seed, cx, cy) {
-  const jitter = CELL_SIZE * 0.145;
+  const jitter = CELL_SIZE * 0.10;
   return {
     x: cx * CELL_SIZE + CELL_SIZE * 0.5 + hashSigned(seed, cx, cy, 11) * jitter,
     y: cy * CELL_SIZE + CELL_SIZE * 0.5 + hashSigned(seed, cx, cy, 12) * jitter,
@@ -228,34 +228,221 @@ function oppositeSide(side) {
   return (side + 2) % 4;
 }
 
-function roomDimensions(rng, attachSide, depth) {
+function complexProfile(seed, cx, cy) {
+  const roll = hash01(seed, cx, cy, 744);
+  if (roll < 0.18) {
+    return {
+      name: 'service-maze',
+      targetBase: 27,
+      targetJitter: 12,
+      branch: 0.82,
+      majorChance: 0.045,
+      openChance: 0.16,
+      cutoutChance: 0.08,
+      columnChance: 0.12,
+      partitionChance: 0.54,
+      scale: 0.82,
+    };
+  }
+  if (roll < 0.36) {
+    return {
+      name: 'galleries',
+      targetBase: 23,
+      targetJitter: 11,
+      branch: 0.74,
+      majorChance: 0.075,
+      openChance: 0.28,
+      cutoutChance: 0.10,
+      columnChance: 0.18,
+      partitionChance: 0.42,
+      scale: 1.02,
+    };
+  }
+  if (roll < 0.53) {
+    return {
+      name: 'atrium',
+      targetBase: 20,
+      targetJitter: 9,
+      branch: 0.67,
+      majorChance: 0.18,
+      openChance: 0.48,
+      cutoutChance: 0.28,
+      columnChance: 0.52,
+      partitionChance: 0.30,
+      scale: 1.08,
+    };
+  }
+  if (roll < 0.69) {
+    return {
+      name: 'office-web',
+      targetBase: 29,
+      targetJitter: 13,
+      branch: 0.86,
+      majorChance: 0.055,
+      openChance: 0.20,
+      cutoutChance: 0.06,
+      columnChance: 0.10,
+      partitionChance: 0.66,
+      scale: 0.88,
+    };
+  }
+  if (roll < 0.84) {
+    return {
+      name: 'warehouse',
+      targetBase: 19,
+      targetJitter: 9,
+      branch: 0.65,
+      majorChance: 0.22,
+      openChance: 0.42,
+      cutoutChance: 0.18,
+      columnChance: 0.72,
+      partitionChance: 0.22,
+      scale: 1.16,
+    };
+  }
+  return {
+    name: 'mixed',
+    targetBase: 24,
+    targetJitter: 12,
+    branch: 0.76,
+    majorChance: 0.11,
+    openChance: 0.31,
+    cutoutChance: 0.16,
+    columnChance: 0.34,
+    partitionChance: 0.40,
+    scale: 1.0,
+  };
+}
+
+function roomDimensions(rng, attachSide, depth, profile) {
   const roll = rng();
   let normal;
   let cross;
   let major = false;
+  let kind = 'room';
 
-  if (roll < 0.15) {
-    normal = 96 + rng() * 78;
-    cross = 26 + rng() * 24;
-  } else if (roll < 0.30) {
-    normal = 34 + rng() * 42;
-    cross = 92 + rng() * 92;
-  } else if (roll < 0.42 && depth < 4) {
-    normal = 104 + rng() * 82;
-    cross = 92 + rng() * 92;
-    major = true;
-  } else if (roll < 0.58) {
-    normal = 42 + rng() * 48;
-    cross = 38 + rng() * 56;
+  if (profile.name === 'service-maze') {
+    if (roll < 0.28) {
+      normal = 30 + rng() * 38;
+      cross = 24 + rng() * 36;
+      kind = 'cell';
+    } else if (roll < 0.52) {
+      normal = 76 + rng() * 92;
+      cross = 22 + rng() * 26;
+      kind = 'service-hall';
+    } else if (roll < 0.76) {
+      normal = 28 + rng() * 36;
+      cross = 72 + rng() * 82;
+      kind = 'cross-hall';
+    } else {
+      normal = 48 + rng() * 62;
+      cross = 40 + rng() * 58;
+      kind = 'room';
+    }
+  } else if (profile.name === 'galleries') {
+    if (roll < 0.38) {
+      normal = 118 + rng() * 112;
+      cross = 28 + rng() * 36;
+      kind = 'gallery';
+    } else if (roll < 0.62) {
+      normal = 40 + rng() * 48;
+      cross = 108 + rng() * 104;
+      kind = 'transverse-gallery';
+    } else if (roll < 0.82) {
+      normal = 72 + rng() * 78;
+      cross = 54 + rng() * 66;
+      kind = 'room';
+    } else {
+      normal = 118 + rng() * 90;
+      cross = 86 + rng() * 78;
+      major = depth < 5;
+      kind = 'hall';
+    }
+  } else if (profile.name === 'atrium') {
+    if (roll < 0.34 && depth < 5) {
+      normal = 126 + rng() * 100;
+      cross = 112 + rng() * 98;
+      major = true;
+      kind = 'atrium';
+    } else if (roll < 0.60) {
+      normal = 88 + rng() * 88;
+      cross = 42 + rng() * 54;
+      kind = 'wing';
+    } else if (roll < 0.80) {
+      normal = 44 + rng() * 54;
+      cross = 92 + rng() * 84;
+      kind = 'wing';
+    } else {
+      normal = 54 + rng() * 66;
+      cross = 48 + rng() * 62;
+      kind = 'room';
+    }
+  } else if (profile.name === 'office-web') {
+    if (roll < 0.36) {
+      normal = 34 + rng() * 42;
+      cross = 32 + rng() * 44;
+      kind = 'office';
+    } else if (roll < 0.60) {
+      normal = 72 + rng() * 86;
+      cross = 24 + rng() * 28;
+      kind = 'office-hall';
+    } else if (roll < 0.78) {
+      normal = 30 + rng() * 34;
+      cross = 74 + rng() * 84;
+      kind = 'office-hall';
+    } else {
+      normal = 62 + rng() * 72;
+      cross = 52 + rng() * 66;
+      kind = 'office-suite';
+    }
+  } else if (profile.name === 'warehouse') {
+    if (roll < 0.44 && depth < 5) {
+      normal = 144 + rng() * 112;
+      cross = 112 + rng() * 96;
+      major = true;
+      kind = 'warehouse';
+    } else if (roll < 0.70) {
+      normal = 110 + rng() * 92;
+      cross = 42 + rng() * 54;
+      kind = 'loading-hall';
+    } else {
+      normal = 72 + rng() * 82;
+      cross = 58 + rng() * 72;
+      kind = 'utility';
+    }
   } else {
-    normal = 58 + rng() * 70;
-    cross = 48 + rng() * 70;
+    if (roll < 0.18) {
+      normal = 108 + rng() * 96;
+      cross = 26 + rng() * 34;
+      kind = 'gallery';
+    } else if (roll < 0.34) {
+      normal = 34 + rng() * 44;
+      cross = 100 + rng() * 96;
+      kind = 'transverse-gallery';
+    } else if (roll < 0.48 && depth < 5) {
+      normal = 118 + rng() * 96;
+      cross = 96 + rng() * 92;
+      major = true;
+      kind = 'hall';
+    } else if (roll < 0.66) {
+      normal = 38 + rng() * 54;
+      cross = 34 + rng() * 58;
+      kind = 'cell';
+    } else {
+      normal = 62 + rng() * 82;
+      cross = 48 + rng() * 76;
+      kind = 'room';
+    }
   }
+
+  major = major || (depth < 5 && rng() < profile.majorChance);
+  normal *= profile.scale;
+  cross *= profile.scale;
 
   if (attachSide === 0 || attachSide === 2) {
-    return { w: normal, h: cross, major };
+    return { w: normal, h: cross, major, kind };
   }
-  return { w: cross, h: normal, major };
+  return { w: cross, h: normal, major, kind };
 }
 
 function withinComplexRadius(room, anchor, maxRadius = MAX_COMPLEX_RADIUS) {
@@ -273,35 +460,91 @@ function collidesWithRooms(candidate, rooms, ignoredIndex) {
   return false;
 }
 
-function addPartitions(room, rng) {
+function addRoomDetails(room, rng, profile, protectedSides = []) {
   room.partitions = [];
   room.columns = [];
+  room.cutouts = [];
+  room.blockedSides = [];
+  room.detailStyle = 'plain';
 
-  if (room.major || rng() < 0.30) {
-    const count = room.major ? 1 + Math.floor(rng() * 3) : 1;
+  const protectedSet = new Set(protectedSides);
+  const partitionChance = profile.partitionChance + (room.kind === 'office-suite' ? 0.20 : 0);
+
+  if (room.major || rng() < partitionChance) {
+    const maxCount = room.major ? 3 : (room.kind === 'office-suite' ? 2 : 1);
+    const count = 1 + Math.floor(rng() * maxCount);
     for (let i = 0; i < count; i++) {
       room.partitions.push({
         axis: rng() < 0.5 ? 'x' : 'y',
-        t: 0.22 + rng() * 0.56,
-        gap: 0.18 + rng() * 0.22,
+        t: 0.18 + rng() * 0.64,
+        gap: 0.15 + rng() * 0.24,
       });
     }
+    room.detailStyle = 'partitioned';
   }
 
-  if (room.major && rng() < 0.65) {
-    const cols = Math.max(1, Math.min(4, Math.floor(room.w / 72)));
-    const rows = Math.max(1, Math.min(4, Math.floor(room.h / 72)));
+  const columnChance = profile.columnChance + (room.kind === 'warehouse' || room.kind === 'atrium' ? 0.18 : 0);
+  if ((room.major || room.w * room.h > 12000) && rng() < columnChance) {
+    const cols = Math.max(1, Math.min(5, Math.floor(room.w / 64)));
+    const rows = Math.max(1, Math.min(5, Math.floor(room.h / 64)));
     for (let y = 1; y <= rows; y++) {
       for (let x = 1; x <= cols; x++) {
         if (rng() < 0.72) {
           room.columns.push({
             u: x / (cols + 1),
             v: y / (rows + 1),
-            r: 2.4 + rng() * 2.8,
+            r: 2.4 + rng() * 3.2,
           });
         }
       }
     }
+    room.detailStyle = room.detailStyle === 'plain' ? 'columns' : room.detailStyle;
+  }
+
+  const canCut = room.w > 100 && room.h > 88 && rng() < profile.cutoutChance;
+  if (canCut) {
+    const availableSides = [0, 1, 2, 3].filter((side) => !protectedSet.has(side));
+    if (availableSides.length) {
+      const side = availableSides[Math.floor(rng() * availableSides.length)];
+      const depthFrac = 0.18 + rng() * 0.24;
+      const spanFrac = 0.26 + rng() * 0.34;
+      const cutout = {
+        side,
+        x: 0,
+        y: 0,
+        w: side === 0 || side === 2 ? room.w * depthFrac : room.w * spanFrac,
+        h: side === 1 || side === 3 ? room.h * depthFrac : room.h * spanFrac,
+      };
+
+      if (side === 0) {
+        cutout.x = room.w * 0.5 - cutout.w * 0.5;
+        cutout.y = (rng() - 0.5) * Math.max(0, room.h - cutout.h) * 0.52;
+      } else if (side === 2) {
+        cutout.x = -room.w * 0.5 + cutout.w * 0.5;
+        cutout.y = (rng() - 0.5) * Math.max(0, room.h - cutout.h) * 0.52;
+      } else if (side === 1) {
+        cutout.y = room.h * 0.5 - cutout.h * 0.5;
+        cutout.x = (rng() - 0.5) * Math.max(0, room.w - cutout.w) * 0.52;
+      } else {
+        cutout.y = -room.h * 0.5 + cutout.h * 0.5;
+        cutout.x = (rng() - 0.5) * Math.max(0, room.w - cutout.w) * 0.52;
+      }
+
+      room.cutouts.push(cutout);
+      room.blockedSides.push(side);
+      room.detailStyle = 'notched';
+    }
+  }
+
+  if (!room.cutouts.length && room.major && room.w > 130 && room.h > 110 && rng() < 0.16) {
+    room.cutouts.push({
+      side: -1,
+      x: (rng() - 0.5) * room.w * 0.10,
+      y: (rng() - 0.5) * room.h * 0.10,
+      w: room.w * (0.18 + rng() * 0.16),
+      h: room.h * (0.18 + rng() * 0.16),
+    });
+    room.detailStyle = 'courtyard';
   }
 }
 

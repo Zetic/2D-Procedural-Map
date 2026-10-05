@@ -1,9 +1,13 @@
-export const CELL_SIZE = 760;
+export const CELL_SIZE = 900;
 export const QUERY_HALO = 1;
-export const GENERATOR_VERSION = 5;
+export const GENERATOR_VERSION = 6;
 
 const TAU = Math.PI * 2;
-const MAX_COMPLEX_RADIUS = 315;
+const SITE_GRID = 420;
+const SITE_MIN_DISTANCE = 460;
+const SITE_NEIGHBOR_RADIUS = 3;
+const SITE_PARENT_RADIUS = 4;
+const MAX_COMPLEX_RADIUS = 190;
 const ROUTE_STEP = 64;
 const WALL = '#665947';
 const FLOOR_PALETTES = [
@@ -103,81 +107,166 @@ function choosePalette(seed, cx, cy) {
   return FLOOR_PALETTES[Math.min(index, FLOOR_PALETTES.length - 1)];
 }
 
-function anchorFor(seed, cx, cy) {
-  const jitter = CELL_SIZE * 0.07;
+function siteCandidate(seed, sx, sy) {
+  const root = sx === 0 && sy === 0;
+  const x =
+    sx * SITE_GRID +
+    SITE_GRID * (0.08 + hash01(seed, sx, sy, 11) * 0.84);
+  const y =
+    sy * SITE_GRID +
+    SITE_GRID * (0.08 + hash01(seed, sx, sy, 12) * 0.84);
+
   return {
-    x: cx * CELL_SIZE + CELL_SIZE * 0.5 + hashSigned(seed, cx, cy, 11) * jitter,
-    y: cy * CELL_SIZE + CELL_SIZE * 0.5 + hashSigned(seed, cx, cy, 12) * jitter,
+    sx,
+    sy,
+    x,
+    y,
+    priority: root ? 0 : hashInt(seed, sx, sy, 13),
   };
 }
 
-function parentFor(seed, cx, cy) {
-  if (cx === 0 && cy === 0) return null;
-  if (cx === 0) return [0, cy - sign(cy)];
-  if (cy === 0) return [cx - sign(cx), 0];
-
-  // Diagonal parents are common. The hidden connectivity topology therefore
-  // does not reduce to a visible Manhattan road lattice.
-  const roll = hash01(seed, cx, cy, 21);
-  if (roll < 0.56) return [cx - sign(cx), cy - sign(cy)];
-  if (roll < 0.78) return [cx - sign(cx), cy];
-  return [cx, cy - sign(cy)];
+function anchorFor(seed, sx, sy) {
+  const candidate = siteCandidate(seed, sx, sy);
+  return { x: candidate.x, y: candidate.y };
 }
 
-function parentConnectionCandidates(seed, cx, cy) {
-  if (cx === 0 && cy === 0) return [];
+function candidateWins(a, b) {
+  if (a.priority !== b.priority) return a.priority < b.priority;
+  if (a.sx !== b.sx) return a.sx < b.sx;
+  return a.sy < b.sy;
+}
 
-  const preferred = parentFor(seed, cx, cy);
-  const currentRank = distanceRank(cx, cy);
+function isAcceptedSite(seed, sx, sy) {
+  const candidate = siteCandidate(seed, sx, sy);
+
+  for (let oy = -SITE_NEIGHBOR_RADIUS; oy <= SITE_NEIGHBOR_RADIUS; oy++) {
+    for (let ox = -SITE_NEIGHBOR_RADIUS; ox <= SITE_NEIGHBOR_RADIUS; ox++) {
+      if (ox === 0 && oy === 0) continue;
+
+      const other = siteCandidate(seed, sx + ox, sy + oy);
+      const dx = other.x - candidate.x;
+      const dy = other.y - candidate.y;
+
+      if (dx * dx + dy * dy >= SITE_MIN_DISTANCE * SITE_MIN_DISTANCE) {
+        continue;
+      }
+
+      if (candidateWins(other, candidate)) return false;
+    }
+  }
+
+  return true;
+}
+
+function siteKey(sx, sy) {
+  return sx + ',' + sy;
+}
+
+function siteRank(seed, sx, sy) {
+  const root = siteCandidate(seed, 0, 0);
+  const site = siteCandidate(seed, sx, sy);
+  const dx = site.x - root.x;
+  const dy = site.y - root.y;
+  return dx * dx + dy * dy;
+}
+
+function acceptedSitesAround(seed, sx, sy, radius) {
+  const output = [];
+
+  for (let oy = -radius; oy <= radius; oy++) {
+    for (let ox = -radius; ox <= radius; ox++) {
+      if (ox === 0 && oy === 0) continue;
+      const nx = sx + ox;
+      const ny = sy + oy;
+      if (!isAcceptedSite(seed, nx, ny)) continue;
+      output.push([nx, ny]);
+    }
+  }
+
+  return output;
+}
+
+function parentFor(seed, sx, sy) {
+  if (sx === 0 && sy === 0) return null;
+  if (!isAcceptedSite(seed, sx, sy)) return null;
+
+  const current = siteCandidate(seed, sx, sy);
+  const currentRank = siteRank(seed, sx, sy);
+  let best = null;
+
+  for (let radius = 1; radius <= SITE_PARENT_RADIUS; radius++) {
+    for (let oy = -radius; oy <= radius; oy++) {
+      for (let ox = -radius; ox <= radius; ox++) {
+        if (Math.max(Math.abs(ox), Math.abs(oy)) !== radius) continue;
+
+        const nx = sx + ox;
+        const ny = sy + oy;
+        if (!isAcceptedSite(seed, nx, ny)) continue;
+
+        const rank = siteRank(seed, nx, ny);
+        if (rank >= currentRank) continue;
+
+        const other = siteCandidate(seed, nx, ny);
+        const dx = other.x - current.x;
+        const dy = other.y - current.y;
+        const distance = Math.hypot(dx, dy);
+        const score =
+          distance *
+          (0.92 + hash01(seed, sx * 131 + nx, sy * 137 + ny, 24) * 0.16);
+
+        if (
+          !best ||
+          score < best.score ||
+          (score === best.score && siteKey(nx, ny) < siteKey(best.x, best.y))
+        ) {
+          best = { x: nx, y: ny, score };
+        }
+      }
+    }
+
+    if (best && best.score < (radius + 0.35) * SITE_GRID) break;
+  }
+
+  if (best) return [best.x, best.y];
+
+  // The forced root site is a deterministic final fallback. In the normal
+  // blue-noise field a lower-rank neighbor is found long before this branch.
+  return [0, 0];
+}
+
+function parentConnectionCandidates(seed, sx, sy) {
+  const parent = parentFor(seed, sx, sy);
+  if (!parent) return [];
+
+  const current = siteCandidate(seed, sx, sy);
+  const currentRank = siteRank(seed, sx, sy);
   const candidates = [];
   const seen = new Set();
 
-  function add(x, y, preferredRank = false) {
-    if (x === cx && y === cy) return;
-    if (distanceRank(x, y) >= currentRank) return;
+  function add(nx, ny, preferred = false) {
+    if (!isAcceptedSite(seed, nx, ny)) return;
+    if (siteRank(seed, nx, ny) >= currentRank) return;
 
-    const key = keyOf(x, y);
+    const key = siteKey(nx, ny);
     if (seen.has(key)) return;
     seen.add(key);
 
-    const dx = x - cx;
-    const dy = y - cy;
-    const span = Math.hypot(dx, dy);
-
+    const other = siteCandidate(seed, nx, ny);
+    const distance = Math.hypot(other.x - current.x, other.y - current.y);
     candidates.push({
-      x,
-      y,
-      preferred: preferredRank,
+      x: nx,
+      y: ny,
+      preferred,
       score:
-        span +
-        hash01(
-          seed,
-          cx * 131 + x,
-          cy * 137 + y,
-          24,
-        ) *
-          0.22,
+        distance *
+        (0.94 + hash01(seed, sx * 173 + nx, sy * 179 + ny, 25) * 0.12),
     });
   }
 
-  if (preferred) add(preferred[0], preferred[1], true);
+  add(parent[0], parent[1], true);
 
-  // Nearby lower-rank alternatives are deterministic escape hatches when a
-  // dense architectural pocket makes the ideal hidden parent edge impossible.
-  // Every fallback still decreases rank, so global connectivity remains
-  // acyclic and always progresses toward the origin.
-  for (let radius = 1; radius <= 3; radius++) {
-    for (let oy = -radius; oy <= radius; oy++) {
-      for (let ox = -radius; ox <= radius; ox++) {
-        if (
-          Math.max(Math.abs(ox), Math.abs(oy)) !== radius
-        ) {
-          continue;
-        }
-
-        add(cx + ox, cy + oy, false);
-      }
-    }
+  for (const [nx, ny] of acceptedSitesAround(seed, sx, sy, 3)) {
+    add(nx, ny, false);
   }
 
   candidates.sort((a, b) => {
@@ -193,36 +282,49 @@ function parentConnectionCandidates(seed, cx, cy) {
 function isTreeEdge(seed, ax, ay, bx, by) {
   const aParent = parentFor(seed, ax, ay);
   const bParent = parentFor(seed, bx, by);
-  return (aParent && aParent[0] === bx && aParent[1] === by) ||
-    (bParent && bParent[0] === ax && bParent[1] === ay);
+
+  return (
+    (aParent && aParent[0] === bx && aParent[1] === by) ||
+    (bParent && bParent[0] === ax && bParent[1] === ay)
+  );
 }
 
-function optionalNeighborEdges(seed, cx, cy) {
+function optionalNeighborEdges(seed, sx, sy) {
+  const source = siteCandidate(seed, sx, sy);
   const output = [];
-  const candidates = [
-    [cx + 1, cy, 31],
-    [cx, cy + 1, 32],
-    [cx + 1, cy + 1, 33],
-    [cx + 1, cy - 1, 34],
-  ];
 
-  for (const [nx, ny, salt] of candidates) {
-    if (isTreeEdge(seed, cx, cy, nx, ny)) continue;
+  for (const [nx, ny] of acceptedSitesAround(seed, sx, sy, 2)) {
+    if (nx < sx || (nx === sx && ny <= sy)) continue;
+    if (isTreeEdge(seed, sx, sy, nx, ny)) continue;
 
-    const edge = canonicalEdgeKey(cx, cy, nx, ny);
-    const chance =
-      ((hashString(edge) ^ seed ^ salt) >>> 0) / 4294967296;
-    const rankDelta =
-      Math.abs(distanceRank(nx, ny) - distanceRank(cx, cy));
+    const target = siteCandidate(seed, nx, ny);
+    const distance = Math.hypot(target.x - source.x, target.y - source.y);
+    if (distance > SITE_GRID * 2.35) continue;
 
-    // Extra links stay local. Long graph edges were a major source of the
-    // visible "blob -> road -> blob" pattern even after room decoration.
-    const threshold = rankDelta === 0 ? 0.25 : 0.14;
+    const edge = canonicalEdgeKey(sx, sy, nx, ny);
+    const roll =
+      ((hashString(edge) ^ seed ^ 0x37ac91) >>> 0) / 4294967296;
 
-    if (chance < threshold) output.push([nx, ny]);
+    const threshold =
+      distance < SITE_GRID * 1.35 ? 0.24 :
+      distance < SITE_GRID * 1.8 ? 0.13 : 0.055;
+
+    if (roll < threshold) output.push([nx, ny]);
   }
 
-  return output;
+  output.sort((a, b) => {
+    const da = Math.hypot(
+      siteCandidate(seed, a[0], a[1]).x - source.x,
+      siteCandidate(seed, a[0], a[1]).y - source.y,
+    );
+    const db = Math.hypot(
+      siteCandidate(seed, b[0], b[1]).x - source.x,
+      siteCandidate(seed, b[0], b[1]).y - source.y,
+    );
+    return da - db;
+  });
+
+  return output.slice(0, 2);
 }
 
 function roomAxes(room) {

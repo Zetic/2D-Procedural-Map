@@ -804,6 +804,7 @@ function externalPortalCandidates(complex, target, salt) {
     const room = complex.rooms[roomIndex];
     for (let side = 0; side < 4; side++) {
       if (complex.usedSides.has(roomIndex + ':' + side)) continue;
+      if (room.blockedSides && room.blockedSides.includes(side)) continue;
       const info = sideInfo(room, side);
       const facing = info.normal.x * tx + info.normal.y * ty;
       if (facing < 0.12) continue;

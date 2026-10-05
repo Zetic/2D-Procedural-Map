@@ -734,50 +734,68 @@ function simplifyPath(points) {
   return output;
 }
 
+function pathClear(path, obstacles) {
+  for (let i = 0; i < path.length - 1; i++) {
+    if (!segmentClear(path[i], path[i + 1], obstacles)) return false;
+  }
+  return true;
+}
+
 function fallbackRoute(start, goal, obstacles, routeSeed) {
   const offsets = [0.72, -0.72, 1.18, -1.18].map((v) => v * CELL_SIZE);
   if (hash01(routeSeed, 0, 0, 881) > 0.5) offsets.reverse();
 
   for (const offset of offsets) {
     const midY = (start.y + goal.y) * 0.5 + offset;
-    const path = [
-      start,
-      { x: start.x, y: midY },
-      { x: goal.x, y: midY },
-      goal,
-    ];
-    let clear = true;
-    for (let i = 0; i < path.length - 1; i++) {
-      if (!segmentClear(path[i], path[i + 1], obstacles)) {
-        clear = false;
-        break;
-      }
-    }
-    if (clear) return path;
+    const path = [start, { x: start.x, y: midY }, { x: goal.x, y: midY }, goal];
+    if (pathClear(path, obstacles)) return path;
   }
 
   for (const offset of offsets) {
     const midX = (start.x + goal.x) * 0.5 + offset;
-    const path = [
-      start,
-      { x: midX, y: start.y },
-      { x: midX, y: goal.y },
-      goal,
-    ];
-    let clear = true;
-    for (let i = 0; i < path.length - 1; i++) {
-      if (!segmentClear(path[i], path[i + 1], obstacles)) {
-        clear = false;
-        break;
-      }
-    }
-    if (clear) return path;
+    const path = [start, { x: midX, y: start.y }, { x: midX, y: goal.y }, goal];
+    if (pathClear(path, obstacles)) return path;
+  }
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const obstacle of obstacles) {
+    minX = Math.min(minX, obstacle.x - obstacle.r);
+    maxX = Math.max(maxX, obstacle.x + obstacle.r);
+    minY = Math.min(minY, obstacle.y - obstacle.r);
+    maxY = Math.max(maxY, obstacle.y + obstacle.r);
+  }
+
+  const pad = 90;
+  const outerCandidates = [
+    [start, { x: start.x, y: minY - pad }, { x: goal.x, y: minY - pad }, goal],
+    [start, { x: start.x, y: maxY + pad }, { x: goal.x, y: maxY + pad }, goal],
+    [start, { x: minX - pad, y: start.y }, { x: minX - pad, y: goal.y }, goal],
+    [start, { x: maxX + pad, y: start.y }, { x: maxX + pad, y: goal.y }, goal],
+  ];
+
+  if (hash01(routeSeed, 0, 0, 882) > 0.5) outerCandidates.reverse();
+  for (const path of outerCandidates) {
+    if (pathClear(path, obstacles)) return path;
   }
 
   return [start, goal];
 }
 
-function buildChambers(points, width, color, routeSeed) {
+function chamberClear(chamber, obstacles, corridorWidth) {
+  const halfDiag = Math.hypot(chamber.w, chamber.h) * 0.5;
+  const extra = Math.max(0, halfDiag - corridorWidth * 0.5);
+  for (const obstacle of obstacles) {
+    if (Math.hypot(chamber.x - obstacle.x, chamber.y - obstacle.y) < obstacle.r + extra + 5) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function buildChambers(points, width, color, routeSeed, obstacles) {
   const chambers = [];
 
   for (let i = 1; i < points.length - 1; i++) {
@@ -794,7 +812,7 @@ function buildChambers(points, width, color, routeSeed) {
 
     if (turn > 0.12 || hash01(routeSeed, i, points.length, 922) < 0.20) {
       const size = width * (1.55 + hash01(routeSeed, i, points.length, 923) * 1.45);
-      chambers.push({
+      const chamber = {
         x: point.x,
         y: point.y,
         w: size * (0.90 + hash01(routeSeed, i, points.length, 924) * 0.50),
@@ -804,7 +822,8 @@ function buildChambers(points, width, color, routeSeed) {
         major: false,
         partitions: [],
         columns: [],
-      });
+      };
+      if (chamberClear(chamber, obstacles, width)) chambers.push(chamber);
     }
   }
 
@@ -916,7 +935,7 @@ export class InfiniteMapGenerator {
       points,
       width,
       color,
-      chambers: buildChambers(points.slice(1, -1), width, color, routeSeed),
+      chambers: buildChambers(points.slice(1, -1), width, color, routeSeed, obstacles),
       doors: [corridorDoor(sourcePortal), corridorDoor(targetPortal)],
     };
 

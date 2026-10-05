@@ -866,9 +866,42 @@ function externalPortalCandidates(complex, target, salt) {
 
   if (candidates.length) return candidates;
 
-  const room = complex.rooms[0];
+  // Relax only the facing requirement before ever reusing an occupied wall.
   const fallback = [];
+  for (let roomIndex = 0; roomIndex < complex.rooms.length; roomIndex++) {
+    const room = complex.rooms[roomIndex];
+    for (let side = 0; side < 4; side++) {
+      if (complex.usedSides.has(roomIndex + ':' + side)) continue;
+      if (room.blockedSides && room.blockedSides.includes(side)) continue;
+      const info = sideInfo(room, side);
+      const facing = info.normal.x * tx + info.normal.y * ty;
+      const projection =
+        (info.x - complex.anchor.x) * tx +
+        (info.y - complex.anchor.y) * ty;
+      fallback.push({
+        score: projection + facing * 70,
+        x: info.x,
+        y: info.y,
+        normal: info.normal,
+        tangent: info.tangent,
+        roomIndex,
+        side,
+        width: Math.max(14, Math.min(30, info.halfTangent * 0.58)),
+        color: complex.color,
+      });
+    }
+  }
+
+  if (fallback.length) {
+    fallback.sort((a, b) => b.score - a.score);
+    return fallback;
+  }
+
+  // Extremely saturated complexes may have every exterior side already used.
+  // Reuse the best unblocked root side as a last-resort deterministic portal.
+  const room = complex.rooms[0];
   for (let side = 0; side < 4; side++) {
+    if (room.blockedSides && room.blockedSides.includes(side)) continue;
     const info = sideInfo(room, side);
     const facing = info.normal.x * tx + info.normal.y * ty;
     fallback.push({
@@ -883,6 +916,7 @@ function externalPortalCandidates(complex, target, salt) {
       color: complex.color,
     });
   }
+
   fallback.sort((a, b) => b.score - a.score);
   return fallback;
 }

@@ -1,30 +1,69 @@
 # Infinite 2D Procedural Map
 
-A deterministic, exploration-order-independent infinite 2D procedural architecture map for the browser.
+A deterministic, exploration-order-independent infinite 2D architectural map for the browser.
 
-The visual structure is generated as **organic growth constrained by a hidden connectivity skeleton**:
+Generator version 3 is a structural rewrite aimed at the dense, irregular, connected floor-plan style in the reference map.
 
-- Every structural cell has a deterministic parent that moves one step closer to the origin, so every generated district has a finite path into one globally connected component.
-- Structural anchors are heavily jittered and connection paths meander in world space, preventing the streaming/query grid from becoming visible in the architecture.
-- Rooms and secondary branches grow from already-connected corridors and hubs, so decorative growth cannot create disconnected islands.
-- Optional deterministic cross-links add loops and denser regions without changing the connectivity guarantee.
-- Every decision is derived from `seed + stable world coordinates + feature salt`; generation never depends on exploration order or a global RNG stream.
-- Query cells are only an indexing/cache mechanism. They do not define doors, rooms, or visible boundaries.
+## Generation model
 
-## Collision-aware floor generation
+The world uses three separate layers:
 
-Generator version 2 treats the map as a single 2D floor with no elevation:
+1. **Hidden connectivity graph** — every structural district has a deterministic parent, so the generated world remains one connected component.
+2. **Architectural room growth** — each district grows a collision-free complex of adjacent rooms from explicit wall frontiers.
+3. **Routed inter-district halls** — connections leave rooms only through generated exterior portals and route around neighboring complexes.
 
-- Every proposed room gets a stable deterministic ID and priority.
-- Oriented-room collision tests use a separating-axis test with a small clearance margin.
-- When two room candidates conflict, the same priority winner survives regardless of which direction the map was explored from.
-- Corridors are part of the connected floor rather than a visual layer placed above rooms.
-- Rendering uses wall underlays followed by floor fills, so corridor/room and corridor/corridor intersections become real openings and junctions instead of overlapping shapes.
-- Directly connected room clusters and dead-end branches remain possible, but two room interiors cannot occupy the same 2D space.
+Streaming cells are only a deterministic indexing mechanism. They do not define visible room edges, doors, or corridor boundaries.
+
+## Architectural growth
+
+Each district starts from a large anchor room, then expands through deterministic wall frontiers.
+
+Generated room types include:
+
+- broad chambers
+- narrow halls
+- long rooms
+- short connector rooms
+- small chambers
+- large partitioned rooms
+- rooms containing deterministic column layouts
+
+A new room is accepted only when its oriented footprint is free. It is placed directly against an existing room wall and an explicit doorway is recorded at that shared boundary.
+
+This creates compound, irregular floor-plan silhouettes instead of independent rectangles scattered around a hub.
+
+## No 2D overpasses
+
+The generator assumes one floor and no elevation.
+
+- Room interiors never overlap.
+- A corridor cannot route through a room complex.
+- Corridor entry into a complex is allowed only through a selected exterior wall portal.
+- The short portal-to-route neck is checked against every other room in that complex.
+- Routed corridors use deterministic obstacle-aware A* navigation around complete room complexes.
+- Corridor crossings are same-floor junctions rather than overpasses.
+- Wider turn chambers are added only when their footprint remains clear of room complexes.
+
+## Determinism
+
+Every structural choice comes from:
+
+`generator version + world seed + stable world coordinates + feature salt`
+
+There is no exploration-driven global random-number stream.
+
+The same seed therefore produces the same room complexes, doors, routes, junctions, and layout regardless of which direction is explored first.
+
+Generator version 3 is part of the hash namespace, so older algorithm versions do not silently produce different geometry under the same deterministic contract.
+
+## Controls
+
+- Drag: pan through the infinite map.
+- Mouse wheel / trackpad: zoom around the pointer.
+- Seed field: switch deterministic worlds.
+- `?seed=...`: share a specific world through the URL.
 
 ## Run locally
-
-This project is static. Serve the repository root with any local HTTP server, for example:
 
 ```bash
 python3 -m http.server 8080
@@ -32,19 +71,14 @@ python3 -m http.server 8080
 
 Then open `http://localhost:8080`.
 
-## Controls
+For generator validation:
 
-- Drag: pan through the infinite map.
-- Mouse wheel / trackpad: zoom around the pointer.
-- Seed field: switch to a different deterministic world.
-- `?seed=...`: share a specific world through the URL.
+```bash
+npm test
+```
 
 ## GitHub Pages
 
-`.github/workflows/pages.yml` deploys the repository root whenever `main` changes. In repository **Settings → Pages**, set the source to **GitHub Actions** if it is not already selected.
+`.github/workflows/pages.yml` validates the generator and deploys the repository root whenever `main` changes.
 
-## Determinism
-
-The generator uses 32-bit integer hashing (`Math.imul`, shifts, and stable string hashing) for structural decisions. Each structural cell can be regenerated independently, so visiting east then north produces the same geometry as visiting north then east.
-
-The current hash namespace is explicitly versioned as generator version 2. This prevents later algorithm revisions from silently pretending to be the same deterministic world generation contract.
+In repository **Settings → Pages**, set the source to **GitHub Actions** if it is not already selected.

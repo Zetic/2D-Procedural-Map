@@ -417,13 +417,13 @@ function createComplex(seed, cx, cy) {
   };
 }
 
-function chooseExternalPortal(complex, target, salt) {
+function externalPortalCandidates(complex, target, salt) {
   const dx = target.x - complex.anchor.x;
   const dy = target.y - complex.anchor.y;
   const len = Math.hypot(dx, dy) || 1;
   const tx = dx / len;
   const ty = dy / len;
-  let best = null;
+  const candidates = [];
 
   for (let roomIndex = 0; roomIndex < complex.rooms.length; roomIndex++) {
     const room = complex.rooms[roomIndex];
@@ -431,55 +431,52 @@ function chooseExternalPortal(complex, target, salt) {
       if (complex.usedSides.has(roomIndex + ':' + side)) continue;
       const info = sideInfo(room, side);
       const facing = info.normal.x * tx + info.normal.y * ty;
-      if (facing < 0.18) continue;
+      if (facing < 0.12) continue;
 
       const lateralSeed = hashSigned(salt, roomIndex, side, 991);
-      const lateral = lateralSeed * Math.max(0, info.halfTangent - 15) * 0.36;
+      const lateral = lateralSeed * Math.max(0, info.halfTangent - 15) * 0.34;
       const px = info.x + info.tangent.x * lateral;
       const py = info.y + info.tangent.y * lateral;
       const projection = (px - complex.anchor.x) * tx + (py - complex.anchor.y) * ty;
-      const score = projection + facing * 84 + hash01(salt, roomIndex, side, 992) * 6;
+      const score = projection + facing * 86 + hash01(salt, roomIndex, side, 992) * 6;
 
-      if (!best || score > best.score) {
-        best = {
-          score,
-          x: px,
-          y: py,
-          normal: info.normal,
-          tangent: info.tangent,
-          roomIndex,
-          side,
-          width: Math.max(14, Math.min(32, info.halfTangent * 0.62)),
-          color: complex.color,
-        };
-      }
+      candidates.push({
+        score,
+        x: px,
+        y: py,
+        normal: info.normal,
+        tangent: info.tangent,
+        roomIndex,
+        side,
+        width: Math.max(14, Math.min(32, info.halfTangent * 0.62)),
+        color: complex.color,
+      });
     }
   }
 
-  if (best) return best;
+  candidates.sort((a, b) => b.score - a.score);
+
+  if (candidates.length) return candidates;
 
   const room = complex.rooms[0];
-  let fallback = sideInfo(room, 0);
-  let fallbackDot = -Infinity;
+  const fallback = [];
   for (let side = 0; side < 4; side++) {
     const info = sideInfo(room, side);
     const facing = info.normal.x * tx + info.normal.y * ty;
-    if (facing > fallbackDot) {
-      fallbackDot = facing;
-      fallback = info;
-    }
+    fallback.push({
+      score: facing,
+      x: info.x,
+      y: info.y,
+      normal: info.normal,
+      tangent: info.tangent,
+      roomIndex: 0,
+      side,
+      width: 22,
+      color: complex.color,
+    });
   }
-
-  return {
-    x: fallback.x,
-    y: fallback.y,
-    normal: fallback.normal,
-    tangent: fallback.tangent,
-    roomIndex: 0,
-    side: fallback.side,
-    width: 22,
-    color: complex.color,
-  };
+  fallback.sort((a, b) => b.score - a.score);
+  return fallback;
 }
 
 function pointOutsideComplex(complex, portal, clearance) {
@@ -493,6 +490,43 @@ function pointOutsideComplex(complex, portal, clearance) {
   return {
     x: portal.x + portal.normal.x * t,
     y: portal.y + portal.normal.y * t,
+  };
+}
+
+function segmentRect(a, b, width) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return {
+    x: (a.x + b.x) * 0.5,
+    y: (a.y + b.y) * 0.5,
+    w: Math.max(1, Math.hypot(dx, dy)),
+    h: width,
+    angle: Math.atan2(dy, dx),
+  };
+}
+
+function neckClear(complex, portal, outside, width) {
+  const neck = segmentRect(portal, outside, width);
+  for (let i = 0; i < complex.rooms.length; i++) {
+    if (i === portal.roomIndex) continue;
+    if (roomsOverlap(neck, complex.rooms[i], 3)) return false;
+  }
+  return true;
+}
+
+function chooseClearPortal(complex, target, salt, width) {
+  const candidates = externalPortalCandidates(complex, target, salt);
+  const clearance = width * 0.5 + 15;
+
+  for (const portal of candidates) {
+    const outside = pointOutsideComplex(complex, portal, clearance);
+    if (neckClear(complex, portal, outside, width)) return { portal, outside };
+  }
+
+  const portal = candidates[0];
+  return {
+    portal,
+    outside: pointOutsideComplex(complex, portal, clearance),
   };
 }
 
@@ -571,11 +605,35 @@ function gridKey(gx, gy) {
   return gx + ',' + gy;
 }
 
+function nearestClearGridPoint(point, obstacles) {
+  const baseX = Math.round(point.x / ROUTE_STEP);
+  const baseY = Math.round(point.y / ROUTE_STEP);
+
+  for (let radius = 0; radius <= 4; radius++) {
+    for (let oy = -radius; oy <= radius; oy++) {
+      for (let ox = -radius; ox <= radius; ox++) {
+        if (radius > 0 && Math.abs(ox) !== radius && Math.abs(oy) !== radius) continue;
+        const candidate = {
+          gx: baseX + ox,
+          gy: baseY + oy,
+          x: (baseX + ox) * ROUTE_STEP,
+          y: (baseY + oy) * ROUTE_STEP,
+        };
+        if (segmentClear(point, candidate, obstacles)) return candidate;
+      }
+    }
+  }
+
+  return { gx: baseX, gy: baseY, x: baseX * ROUTE_STEP, y: baseY * ROUTE_STEP };
+}
+
 function routeAStar(start, goal, obstacles, routeSeed) {
-  const sx = Math.round(start.x / ROUTE_STEP);
-  const sy = Math.round(start.y / ROUTE_STEP);
-  const gx = Math.round(goal.x / ROUTE_STEP);
-  const gy = Math.round(goal.y / ROUTE_STEP);
+  const startGrid = nearestClearGridPoint(start, obstacles);
+  const goalGrid = nearestClearGridPoint(goal, obstacles);
+  const sx = startGrid.gx;
+  const sy = startGrid.gy;
+  const gx = goalGrid.gx;
+  const gy = goalGrid.gy;
   const margin = 20;
   const minX = Math.min(sx, gx) - margin;
   const maxX = Math.max(sx, gx) + margin;
@@ -827,11 +885,12 @@ export class InfiniteMapGenerator {
     const target = this.getComplex(bx, by);
     const routeSeed = edgeSalt(edgeKey, this.seed ^ 0x5a17c3);
     const width = 20 + (routeSeed % 15);
-    const sourcePortal = chooseExternalPortal(source, target.anchor, routeSeed ^ 0x1122);
-    const targetPortal = chooseExternalPortal(target, source.anchor, routeSeed ^ 0x3344);
-    const clearance = width * 0.5 + 15;
-    const sourceOutside = pointOutsideComplex(source, sourcePortal, clearance);
-    const targetOutside = pointOutsideComplex(target, targetPortal, clearance);
+    const sourceExit = chooseClearPortal(source, target.anchor, routeSeed ^ 0x1122, width);
+    const targetExit = chooseClearPortal(target, source.anchor, routeSeed ^ 0x3344, width);
+    const sourcePortal = sourceExit.portal;
+    const targetPortal = targetExit.portal;
+    const sourceOutside = sourceExit.outside;
+    const targetOutside = targetExit.outside;
     const obstacles = this.getObstacleComplexes(ax, ay, bx, by, width);
 
     const routed = routeAStar(sourceOutside, targetOutside, obstacles, routeSeed) ||

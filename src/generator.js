@@ -1293,10 +1293,32 @@ function segmentCircleDistanceSq(ax, ay, bx, by, cx, cy) {
 
 function segmentClear(a, b, obstacles) {
   for (const obstacle of obstacles) {
-    if (segmentCircleDistanceSq(a.x, a.y, b.x, b.y, obstacle.x, obstacle.y) < obstacle.r * obstacle.r) {
+    if (obstacle.room) {
+      const segment = segmentRect(
+        a,
+        b,
+        (obstacle.routeWidth || 18) + 6,
+      );
+
+      if (roomsOverlap(segment, obstacle.room, 2)) return false;
+      continue;
+    }
+
+    if (
+      segmentCircleDistanceSq(
+        a.x,
+        a.y,
+        b.x,
+        b.y,
+        obstacle.x,
+        obstacle.y,
+      ) <
+      obstacle.r * obstacle.r
+    ) {
       return false;
     }
   }
+
   return true;
 }
 
@@ -2394,10 +2416,14 @@ export class InfiniteMapGenerator {
           obstacles.push({
             x: room.x,
             y: room.y,
+            // Grid search uses a conservative scalar radius, while final
+            // visibility checks below use the actual oriented room footprint.
             r:
-              Math.hypot(room.w, room.h) * 0.5 +
+              Math.max(room.w, room.h) * 0.5 +
               corridorWidth * 0.5 +
-              7,
+              6,
+            room,
+            routeWidth: corridorWidth,
           });
         }
       }

@@ -1882,6 +1882,101 @@ function buildConnectionFabric(points, width, color, routeSeed, obstacles) {
         color,
         kind: rng() < 0.38 ? 'opening' : 'internal',
       });
+
+      // Some side rooms continue for one more generation. These short branch
+      // chains fill lateral voids and stop the connection fabric from reading
+      // as a simple necklace along one center line.
+      if (rng() < (major ? 0.48 : 0.24)) {
+        const branchW = 34 + rng() * 54;
+        const branchH = 30 + rng() * 50;
+        const branchTurn = rng() < 0.34;
+        const branchNormal = branchTurn
+          ? {
+              x: tangent.x * (rng() < 0.5 ? -1 : 1),
+              y: tangent.y * (rng() < 0.5 ? -1 : 1),
+            }
+          : normal;
+        const branchTangent = {
+          x: -branchNormal.y,
+          y: branchNormal.x,
+        };
+
+        const branchParentHalf = branchTurn
+          ? annex.w * 0.5
+          : annex.h * 0.5;
+        const branchChildHalf = branchTurn
+          ? branchW * 0.5
+          : branchH * 0.5;
+        const branchOffset =
+          (rng() - 0.5) *
+          Math.max(0, (branchTurn ? annex.h : annex.w) - (branchTurn ? branchH : branchW)) *
+          0.34;
+
+        const branch = {
+          id: annex.id + ':branch',
+          x:
+            annex.x +
+            branchNormal.x * (branchParentHalf + branchChildHalf) +
+            branchTangent.x * branchOffset,
+          y:
+            annex.y +
+            branchNormal.y * (branchParentHalf + branchChildHalf) +
+            branchTangent.y * branchOffset,
+          w: branchW,
+          h: branchH,
+          angle: branchTurn ? angle + Math.PI / 2 : angle,
+          color,
+          major: false,
+          kind: rng() < 0.5 ? 'branch-room' : 'alcove',
+        };
+
+        connectionRoomDetails(
+          branch,
+          routeSeed ^ 0x61a7d,
+          i * 11 + a,
+        );
+
+        const annexIndex = chambers.length - 1;
+
+        if (
+          fabricRoomClear(
+            branch,
+            obstacles,
+            chambers,
+            width,
+            annexIndex,
+          )
+        ) {
+          chambers.push(branch);
+
+          const branchWallX =
+            annex.x +
+            branchNormal.x * branchParentHalf +
+            branchTangent.x * branchOffset;
+          const branchWallY =
+            annex.y +
+            branchNormal.y * branchParentHalf +
+            branchTangent.y * branchOffset;
+
+          fabricDoors.push({
+            x: branchWallX,
+            y: branchWallY,
+            angle: Math.atan2(
+              branchTangent.y,
+              branchTangent.x,
+            ),
+            width: Math.max(
+              12,
+              Math.min(
+                30,
+                (branchTurn ? branchH : branchW) * 0.48,
+              ),
+            ),
+            color,
+            kind: rng() < 0.30 ? 'opening' : 'internal',
+          });
+        }
+      }
     }
   }
 

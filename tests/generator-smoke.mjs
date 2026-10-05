@@ -1,369 +1,394 @@
 import {
+  FABRIC_CELL,
+  FABRIC_CHUNK,
   GENERATOR_VERSION,
   InfiniteMapGenerator,
-  isSiteCell,
+  MACRO_SIZE,
   parentCell,
-  roomsOverlap,
-  sitePosition,
 } from '../src/generator.js';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function segmentRect(a, b, width) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  return {
-    x: (a.x + b.x) * 0.5,
-    y: (a.y + b.y) * 0.5,
-    w: Math.max(1, Math.hypot(dx, dy)),
-    h: width,
-    angle: Math.atan2(dy, dx),
-  };
-}
-
-function snapshot(cells) {
-  return JSON.stringify(cells.map((cell) => ({
-    cx: cell.cx,
-    cy: cell.cy,
-    siteId: cell.siteId,
-    parent: cell.parent,
-    anchor: [
-      Number(cell.anchor.x.toFixed(4)),
-      Number(cell.anchor.y.toFixed(4)),
-    ],
-    rooms: cell.rooms.map((room) => [
-      room.id,
-      Number(room.x.toFixed(4)),
-      Number(room.y.toFixed(4)),
-      Number(room.w.toFixed(4)),
-      Number(room.h.toFixed(4)),
-      Number(room.angle.toFixed(6)),
-      room.kind,
-    ]),
-    doors: cell.doors.map((door) => [
-      Number(door.x.toFixed(3)),
-      Number(door.y.toFixed(3)),
-      Number(door.angle.toFixed(5)),
-      Number(door.width.toFixed(3)),
-      door.kind,
-    ]),
-    corridors: cell.corridors.map((corridor) => [
-      corridor.edgeKey,
-      Number(corridor.width.toFixed(3)),
-      corridor.points.map((point) => [
-        Number(point.x.toFixed(3)),
-        Number(point.y.toFixed(3)),
+function snapshot(chunks) {
+  return JSON.stringify(
+    chunks.map((chunk) => ({
+      cx: chunk.cx,
+      cy: chunk.cy,
+      occupiedCount: chunk.occupiedCount,
+      floors: chunk.floors.map((rect) => [
+        Number(rect.x.toFixed(3)),
+        Number(rect.y.toFixed(3)),
+        Number(rect.w.toFixed(3)),
+        Number(rect.h.toFixed(3)),
+        rect.color,
       ]),
-      corridor.chambers.map((room) => [
-        room.id,
-        Number(room.x.toFixed(3)),
-        Number(room.y.toFixed(3)),
-        Number(room.w.toFixed(3)),
-        Number(room.h.toFixed(3)),
-        room.kind,
+      walls: chunk.walls.map((wall) => [
+        Number(wall.x1.toFixed(3)),
+        Number(wall.y1.toFixed(3)),
+        Number(wall.x2.toFixed(3)),
+        Number(wall.y2.toFixed(3)),
       ]),
-      (corridor.fabricDoors || []).map((door) => [
-        Number(door.x.toFixed(3)),
-        Number(door.y.toFixed(3)),
-        Number(door.width.toFixed(3)),
-        door.kind,
-      ]),
-    ]),
-  })));
-}
+      details: chunk.details.map((detail) => {
+        if (detail.type === 'column') {
+          return [
+            'column',
+            Number(detail.x.toFixed(3)),
+            Number(detail.y.toFixed(3)),
+            Number(detail.r.toFixed(3)),
+          ];
+        }
 
-function rootDistanceSq(seed, cx, cy) {
-  const root = sitePosition(seed, 0, 0);
-  const point = sitePosition(seed, cx, cy);
-  const dx = point.x - root.x;
-  const dy = point.y - root.y;
-  return dx * dx + dy * dy;
-}
-
-function verifyParentChain(seed, cx, cy) {
-  let x = cx;
-  let y = cy;
-  let guard = 0;
-
-  while (x !== 0 || y !== 0) {
-    assert(isSiteCell(seed, x, y), `Expected accepted site at ${x},${y}`);
-
-    const parent = parentCell(seed, x, y);
-    assert(parent, `Missing parent for site ${x},${y}`);
-
-    const before = rootDistanceSq(seed, x, y);
-    const after = rootDistanceSq(seed, parent[0], parent[1]);
-
-    assert(
-      after < before,
-      `Parent did not decrease root distance for ${x},${y}`,
-    );
-
-    [x, y] = parent;
-    guard += 1;
-    assert(guard < 500, `Parent chain guard exceeded for ${cx},${cy}`);
-  }
-}
-
-function verifyBlueNoiseSites(seed, cells) {
-  const sites = cells.map((cell) => ({
-    cx: cell.cx,
-    cy: cell.cy,
-    x: cell.anchor.x,
-    y: cell.anchor.y,
-  }));
-
-  for (let i = 0; i < sites.length; i++) {
-    for (let j = i + 1; j < sites.length; j++) {
-      const dx = sites[i].x - sites[j].x;
-      const dy = sites[i].y - sites[j].y;
-      const distance = Math.hypot(dx, dy);
-
-      assert(
-        distance >= 499.9,
-        `Blue-noise sites too close: ${sites[i].cx},${sites[i].cy} and ${sites[j].cx},${sites[j].cy} at ${distance.toFixed(2)}`,
-      );
-    }
-  }
-
-  const bucketCounts = new Map();
-  const bucketSize = 900;
-  let minBX = Infinity;
-  let maxBX = -Infinity;
-  let minBY = Infinity;
-  let maxBY = -Infinity;
-
-  for (const site of sites) {
-    const bx = Math.floor(site.x / bucketSize);
-    const by = Math.floor(site.y / bucketSize);
-    minBX = Math.min(minBX, bx);
-    maxBX = Math.max(maxBX, bx);
-    minBY = Math.min(minBY, by);
-    maxBY = Math.max(maxBY, by);
-    const key = `${bx},${by}`;
-    bucketCounts.set(key, (bucketCounts.get(key) || 0) + 1);
-  }
-
-  const counts = [];
-
-  for (let by = minBY; by <= maxBY; by++) {
-    for (let bx = minBX; bx <= maxBX; bx++) {
-      counts.push(bucketCounts.get(`${bx},${by}`) || 0);
-    }
-  }
-
-  assert(
-    new Set(counts).size >= 3,
-    'Expected strongly varying site counts per query-sized bucket',
-  );
-  assert(
-    counts.some((count) => count === 0),
-    'Expected some query-sized buckets to contain no growth source',
-  );
-  assert(
-    counts.some((count) => count >= 2),
-    'Expected some query-sized buckets to contain multiple growth sources',
+        return [
+          'partition',
+          Number(detail.a1.x.toFixed(3)),
+          Number(detail.a1.y.toFixed(3)),
+          Number(detail.a2.x.toFixed(3)),
+          Number(detail.a2.y.toFixed(3)),
+          Number(detail.b1.x.toFixed(3)),
+          Number(detail.b1.y.toFixed(3)),
+          Number(detail.b2.x.toFixed(3)),
+          Number(detail.b2.y.toFixed(3)),
+        ];
+      }),
+    })),
   );
 }
 
-function verifyRegion(seed, generator, bounds) {
-  const cells = generator.query(bounds);
-  const rooms = [];
-  const corridorMap = new Map();
+function verifyParentTree(seed) {
+  for (let my = -18; my <= 18; my += 2) {
+    for (let mx = -18; mx <= 18; mx += 2) {
+      let x = mx;
+      let y = my;
+      let guard = 0;
 
-  for (const cell of cells) {
-    verifyParentChain(seed, cell.cx, cell.cy);
-    rooms.push(...cell.rooms);
+      while (x !== 0 || y !== 0) {
+        const before = Math.abs(x) + Math.abs(y);
+        const parent = parentCell(seed, x, y);
 
-    for (const corridor of cell.corridors) {
-      corridorMap.set(corridor.edgeKey, corridor);
-    }
-  }
+        assert(parent, `Missing parent for ${seed} at ${x},${y}`);
 
-  verifyBlueNoiseSites(seed, cells);
+        const after =
+          Math.abs(parent[0]) +
+          Math.abs(parent[1]);
 
-  for (let i = 0; i < rooms.length; i++) {
-    for (let j = i + 1; j < rooms.length; j++) {
-      assert(
-        !roomsOverlap(rooms[i], rooms[j], -0.1),
-        `Local room interior overlap: ${rooms[i].id} and ${rooms[j].id}`,
-      );
-    }
-  }
-
-  let maxSegmentLength = 0;
-  let fabricRooms = 0;
-  let fabricDoors = 0;
-
-  for (const corridor of corridorMap.values()) {
-    fabricRooms += corridor.chambers.length;
-    fabricDoors += (corridor.fabricDoors || []).length;
-
-    for (let i = 0; i < corridor.points.length - 1; i++) {
-      const a = corridor.points[i];
-      const b = corridor.points[i + 1];
-
-      maxSegmentLength = Math.max(
-        maxSegmentLength,
-        Math.hypot(b.x - a.x, b.y - a.y),
-      );
-    }
-
-    for (let i = 1; i < corridor.points.length - 2; i++) {
-      const segment = segmentRect(
-        corridor.points[i],
-        corridor.points[i + 1],
-        corridor.width,
-      );
-
-      for (const room of rooms) {
         assert(
-          !roomsOverlap(segment, room, -0.1),
-          `Growth spine ${corridor.edgeKey} crosses local room ${room.id}`,
+          after < before,
+          `Parent did not reduce rank for ${seed} at ${x},${y}`,
         );
-      }
-    }
 
-    for (const chamber of corridor.chambers) {
-      for (const room of rooms) {
+        [x, y] = parent;
+
+        guard += 1;
         assert(
-          !roomsOverlap(chamber, room, -0.1),
-          `Growth-fabric room for ${corridor.edgeKey} overlaps local room ${room.id}`,
+          guard < 500,
+          `Parent chain guard exceeded for ${seed}`,
         );
       }
     }
   }
+}
 
-  const kinds = new Set();
-  let cutouts = 0;
-  let wideOpenings = 0;
+function rasterizeCore(chunks, bounds) {
+  const minGX = Math.floor(bounds.minX / FABRIC_CELL);
+  const maxGX = Math.ceil(bounds.maxX / FABRIC_CELL) - 1;
+  const minGY = Math.floor(bounds.minY / FABRIC_CELL);
+  const maxGY = Math.ceil(bounds.maxY / FABRIC_CELL) - 1;
+  const width = maxGX - minGX + 1;
+  const height = maxGY - minGY + 1;
+  const occupied = new Uint8Array(width * height);
 
-  for (const cell of cells) {
-    for (const room of cell.rooms) {
-      kinds.add(room.kind);
-      if ((room.cutouts || []).length) cutouts += 1;
-    }
+  for (const chunk of chunks) {
+    for (const rect of chunk.floors) {
+      const startX = Math.max(
+        minGX,
+        Math.floor(rect.x / FABRIC_CELL),
+      );
+      const endX = Math.min(
+        maxGX,
+        Math.ceil((rect.x + rect.w) / FABRIC_CELL) - 1,
+      );
+      const startY = Math.max(
+        minGY,
+        Math.floor(rect.y / FABRIC_CELL),
+      );
+      const endY = Math.min(
+        maxGY,
+        Math.ceil((rect.y + rect.h) / FABRIC_CELL) - 1,
+      );
 
-    for (const door of cell.doors) {
-      if (door.kind === 'opening') wideOpenings += 1;
+      for (let gy = startY; gy <= endY; gy++) {
+        for (let gx = startX; gx <= endX; gx++) {
+          occupied[
+            (gy - minGY) * width +
+            (gx - minGX)
+          ] = 1;
+        }
+      }
     }
   }
 
   return {
-    sites: cells.length,
-    rooms: rooms.length,
-    corridors: corridorMap.size,
-    fabricRooms,
-    fabricDoors,
-    maxSegmentLength,
-    cutouts,
-    wideOpenings,
-    kinds,
+    occupied,
+    width,
+    height,
   };
 }
 
-assert(GENERATOR_VERSION === 6, 'Expected generator version 6');
+function connectedMassStats(chunks, bounds) {
+  const { occupied, width, height } =
+    rasterizeCore(chunks, bounds);
 
-const seeds = ['backrooms-71', 'alpha', 'reference'];
-const regions = [
-  { minX: -2200, maxX: 2200, minY: -1650, maxY: 1650 },
-  { minX: 3200, maxX: 6200, minY: -3000, maxY: 0 },
-];
+  const seen = new Uint8Array(occupied.length);
+  const queueX = new Int32Array(occupied.length);
+  const queueY = new Int32Array(occupied.length);
 
-const totals = {
-  sites: 0,
-  rooms: 0,
-  corridors: 0,
-  fabricRooms: 0,
-  fabricDoors: 0,
-  cutouts: 0,
-  wideOpenings: 0,
-  maxSegmentLength: 0,
-};
-const observedKinds = new Set();
+  let occupiedCount = 0;
+  for (const value of occupied) occupiedCount += value;
 
-for (const seed of seeds) {
+  let components = 0;
+  let largest = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = y * width + x;
+      if (!occupied[index] || seen[index]) continue;
+
+      components += 1;
+
+      let head = 0;
+      let tail = 0;
+      let count = 0;
+
+      queueX[tail] = x;
+      queueY[tail] = y;
+      tail += 1;
+      seen[index] = 1;
+
+      while (head < tail) {
+        const cx = queueX[head];
+        const cy = queueY[head];
+        head += 1;
+        count += 1;
+
+        const neighbors = [
+          [cx + 1, cy],
+          [cx - 1, cy],
+          [cx, cy + 1],
+          [cx, cy - 1],
+        ];
+
+        for (const [nx, ny] of neighbors) {
+          if (
+            nx < 0 ||
+            ny < 0 ||
+            nx >= width ||
+            ny >= height
+          ) {
+            continue;
+          }
+
+          const nIndex = ny * width + nx;
+
+          if (
+            occupied[nIndex] &&
+            !seen[nIndex]
+          ) {
+            seen[nIndex] = 1;
+            queueX[tail] = nx;
+            queueY[tail] = ny;
+            tail += 1;
+          }
+        }
+      }
+
+      largest = Math.max(largest, count);
+    }
+  }
+
+  return {
+    occupiedCount,
+    components,
+    largestFraction:
+      occupiedCount > 0 ? largest / occupiedCount : 0,
+  };
+}
+
+function verifyFabric(seed) {
   const generator = new InfiniteMapGenerator(seed);
 
-  for (const region of regions) {
-    const result = verifyRegion(seed, generator, region);
+  const bounds = {
+    minX: -1440,
+    maxX: 1440,
+    minY: -1080,
+    maxY: 1080,
+  };
 
-    totals.sites += result.sites;
-    totals.rooms += result.rooms;
-    totals.corridors += result.corridors;
-    totals.fabricRooms += result.fabricRooms;
-    totals.fabricDoors += result.fabricDoors;
-    totals.cutouts += result.cutouts;
-    totals.wideOpenings += result.wideOpenings;
-    totals.maxSegmentLength = Math.max(
-      totals.maxSegmentLength,
-      result.maxSegmentLength,
+  const chunks = generator.query(bounds);
+
+  assert(chunks.length > 0, 'Expected generated chunks');
+
+  for (const chunk of chunks) {
+    assert(
+      !('corridors' in chunk),
+      'v7 must not expose connector geometry',
     );
-
-    for (const kind of result.kinds) observedKinds.add(kind);
+    assert(
+      !('rooms' in chunk),
+      'v7 must not expose source-owned room complexes',
+    );
+    assert(
+      !('doors' in chunk),
+      'v7 must not expose a separate connection-door layer',
+    );
   }
 
-  const home = { minX: -1000, maxX: 1000, minY: -800, maxY: 800 };
-  const before = snapshot(generator.query(home));
+  const densities = chunks.map(
+    (chunk) =>
+      chunk.occupiedCount /
+      Math.max(1, chunk.cellCount),
+  );
+
+  const averageDensity =
+    densities.reduce((a, b) => a + b, 0) /
+    densities.length;
+
+  const variance =
+    densities.reduce(
+      (sum, value) =>
+        sum +
+        (value - averageDensity) *
+          (value - averageDensity),
+      0,
+    ) / densities.length;
+
+  const densityDeviation = Math.sqrt(variance);
+
+  assert(
+    averageDensity >= 0.28 &&
+      averageDensity <= 0.72,
+    `Unexpected architectural density ${averageDensity.toFixed(3)}`,
+  );
+
+  assert(
+    densityDeviation >= 0.08,
+    `Expected macro density variation, got deviation ${densityDeviation.toFixed(3)}`,
+  );
+
+  const connected = connectedMassStats(
+    chunks,
+    bounds,
+  );
+
+  assert(
+    connected.largestFraction >= 0.90,
+    `Expected one dominant continuous architectural mass, got ${(connected.largestFraction * 100).toFixed(1)}%`,
+  );
+
+  const before = snapshot(
+    generator.query({
+      minX: -900,
+      maxX: 900,
+      minY: -720,
+      maxY: 720,
+    }),
+  );
 
   generator.query({
-    minX: 12000,
-    maxX: 14000,
-    minY: -10000,
-    maxY: -8000,
+    minX: 16000,
+    maxX: 18000,
+    minY: -12000,
+    maxY: -10000,
   });
 
-  const after = snapshot(generator.query(home));
+  const after = snapshot(
+    generator.query({
+      minX: -900,
+      maxX: 900,
+      minY: -720,
+      maxY: 720,
+    }),
+  );
 
   assert(
     before === after,
     `Exploration-order determinism failed for ${seed}`,
   );
+
+  return {
+    chunks: chunks.length,
+    averageDensity,
+    densityDeviation,
+    largestFraction: connected.largestFraction,
+    components: connected.components,
+    floors: chunks.reduce(
+      (sum, chunk) => sum + chunk.floors.length,
+      0,
+    ),
+    walls: chunks.reduce(
+      (sum, chunk) => sum + chunk.walls.length,
+      0,
+    ),
+    details: chunks.reduce(
+      (sum, chunk) => sum + chunk.details.length,
+      0,
+    ),
+  };
 }
 
-const averageRoomsPerSite = totals.rooms / Math.max(1, totals.sites);
-const averageFabricRoomsPerCorridor =
-  totals.fabricRooms / Math.max(1, totals.corridors);
+assert(
+  GENERATOR_VERSION === 7,
+  'Expected generator version 7',
+);
 
 assert(
-  averageRoomsPerSite >= 7,
-  `Expected dense local growth, got only ${averageRoomsPerSite.toFixed(2)} rooms/site`,
+  FABRIC_CHUNK % FABRIC_CELL === 0,
+  'Fabric chunk must align to raster cell size',
 );
+
 assert(
-  averageFabricRoomsPerCorridor >= 3,
-  `Expected dense connection fabric, got only ${averageFabricRoomsPerCorridor.toFixed(2)} rooms/connection`,
+  MACRO_SIZE > FABRIC_CHUNK,
+  'Macro topology must remain independent from streaming chunks',
 );
-assert(
-  totals.maxSegmentLength <= 115,
-  `Uninterrupted growth segment too long: ${totals.maxSegmentLength.toFixed(2)}`,
-);
-assert(
-  observedKinds.size >= 10,
-  `Expected architectural variety, observed only ${observedKinds.size} kinds`,
-);
-assert(totals.cutouts > 0, 'Expected notched/courtyard room shapes');
-assert(totals.wideOpenings > 0, 'Expected wide compound-room openings');
+
+const seeds = [
+  'backrooms-71',
+  'alpha',
+  'reference',
+];
+
+const results = [];
+
+for (const seed of seeds) {
+  verifyParentTree(seed);
+  results.push({
+    seed,
+    ...verifyFabric(seed),
+  });
+}
 
 console.log(
   JSON.stringify({
     generatorVersion: GENERATOR_VERSION,
-    seeds: seeds.length,
-    regions: seeds.length * regions.length,
-    sites: totals.sites,
-    rooms: totals.rooms,
-    corridors: totals.corridors,
-    fabricRooms: totals.fabricRooms,
-    fabricDoors: totals.fabricDoors,
-    averageRoomsPerSite: Number(averageRoomsPerSite.toFixed(2)),
-    averageFabricRoomsPerCorridor: Number(
-      averageFabricRoomsPerCorridor.toFixed(2),
-    ),
-    maxSegmentLength: Number(totals.maxSegmentLength.toFixed(2)),
-    roomKinds: [...observedKinds].sort(),
-    cutouts: totals.cutouts,
-    wideOpenings: totals.wideOpenings,
+    seeds: results.length,
+    results: results.map((result) => ({
+      seed: result.seed,
+      chunks: result.chunks,
+      averageDensity: Number(
+        result.averageDensity.toFixed(3),
+      ),
+      densityDeviation: Number(
+        result.densityDeviation.toFixed(3),
+      ),
+      largestContinuousMass: Number(
+        result.largestFraction.toFixed(4),
+      ),
+      componentsInCrop: result.components,
+      floors: result.floors,
+      walls: result.walls,
+      details: result.details,
+    })),
     status: 'ok',
   }),
 );

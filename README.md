@@ -2,93 +2,153 @@
 
 A deterministic, exploration-order-independent infinite 2D architectural map for the browser.
 
-Generator version 6 removes the last architectural dependency on a regular structural grid.
+Generator version 7 replaces the previous **local complex + connector** model with one continuous architectural accretion system.
 
-## Generator v6: irregular growth field
+## Generator v7: one architectural fabric
 
-Earlier versions still had one main architectural source per regular structural cell. Even with jittered anchors, diagonal parents, and room-filled connectors, zooming far out could reveal the original lattice.
+Visible generation no longer contains separate concepts for:
 
-Version 6 replaces that model with a deterministic blue-noise growth field:
-
-- a small internal hash lattice creates only **candidate** world-space points
-- candidates compete with nearby candidates by stable hash priority
-- candidates closer than the minimum separation suppress one another
-- the surviving sites form an irregular deterministic point field
-- there is no one-site-per-cell rule
-- query/cache buckets are completely separate from architectural ownership
-- architecture can extend across any query boundary
-
-The internal candidate lattice is therefore only an enumeration mechanism. Its cells do not own rooms, districts, doors, connections, colors, or visible boundaries.
-
-## Connectivity without visible roads
-
-Every accepted growth site has a deterministic lower-rank parent toward the root site.
-
-The parent relationship is a connectivity obligation, not a request to draw a straight road. Required connections are converted into architectural fabric:
-
-- short growth-spine segments
-- waystations
+- source complexes
+- destination complexes
+- corridors between complexes
 - connector rooms
-- hall rooms
-- passage rooms
-- side annexes
-- second-generation branch rooms
-- wide openings and junctions
+- connector-specific rendering
+- per-site door layers
 
-A blocked preferred parent can use another deterministic lower-rank nearby site. Parent rank always decreases, so every accepted site still has a finite chain toward the root.
+The renderer receives only:
 
-Optional local links add loops without changing that guarantee.
+- floor mass
+- exterior boundary walls
+- architectural details
 
-## No regular placement rhythm
+That means required global connectivity is buried inside the same geometry as ordinary rooms and branches.
 
-Accepted sites are separated by a deterministic hard-core distance and can occur at arbitrary positions inside their candidate buckets.
+## How the world grows
 
-The smoke suite verifies:
+A sparse hidden macro tree still guarantees that every region ultimately has a finite topological path toward the origin, but that tree is not rendered directly.
 
-- accepted sites maintain the required minimum separation
-- query-sized world buckets contain varying numbers of architectural sites
-- parent chains monotonically approach the root
-- exploration order does not alter generated geometry
+Each hidden edge is converted into a dense sequence of overlapping architectural events:
 
-This specifically prevents the previous pattern of one dense island appearing at every fixed interval.
-
-## Continuous architectural fabric
-
-Local growth retains the varied room families from v4/v5:
-
-- service mazes
+- ordinary rooms
+- transverse rooms
 - galleries
-- atriums
-- office webs
-- warehouse areas
-- mixed architectural regions
+- large chambers
+- side annexes
+- multi-step branches
+- branch forks
+- occasional non-rectangular spaces
+- internal partitions
+- column fields
 
-Rooms may contain partitions, columns, notches, courtyards, wide openings, offices, halls, utility rooms, galleries, and larger chambers.
+The architectural events deliberately overlap before rasterization. Overlap is treated as a **union of floor space**, not as two rooms incorrectly occupying the same floor.
 
-Between local growth sources, v5-style connection fabric remains, but the sources are now irregularly distributed rather than grid-owned. The connection layer also uses room-scale occupancy and short uninterrupted segments, so it behaves as expanding architecture rather than a long road between regularly spaced blobs.
+Because only the union boundary is rendered, the original primitives disappear into compound shapes. Internal growth events can merge, cross, and reconnect without producing visual overpasses or stacked geometry.
 
-## Single-floor collision rules
+## Continuous accretion instead of visible connections
 
-The generator assumes one floor and no elevation.
+Primary growth events are sampled closely enough that consecutive spaces physically overlap.
 
-- local room interiors cannot overlap
-- growth spines cannot cross local room interiors
-- connection-fabric rooms cannot overlap local room interiors
-- entry into a local growth region occurs through explicit exterior portals
-- route occupancy includes multiple neighboring candidate rings because accepted sites are heavily jittered
-- independent growth fabrics that meet are treated as same-floor junctions rather than overpasses
+There is no fallback operation that draws a long narrow line between two distant architectural islands.
 
-## Determinism
+A hidden connectivity obligation therefore becomes:
 
-Every decision comes from:
+```text
+room → chamber → branching rooms → compound mass → merge
+```
 
-`generator version + world seed + stable world coordinates + feature salt`
+rather than:
 
-There is no exploration-driven global random stream.
+```text
+complex ───────── corridor ───────── complex
+```
 
-The same seed therefore regenerates the same accepted growth sites, rooms, routes, branches, openings, and junctions regardless of exploration direction.
+Optional cross-links add local cycles and make independently growing branches merge into the same floor mass.
 
-Generator version 6 is part of the hash namespace.
+## Density and macro variation
+
+Version 7 uses smooth deterministic world-space fields to vary:
+
+- architectural density
+- openness
+- room scale
+- branch frequency
+- chamber frequency
+- turning frequency
+- color regions
+
+These fields vary over much larger distances than streaming chunks, so dense and sparse areas transition gradually rather than changing at chunk boundaries.
+
+The current target density is intentionally broad. Sampled seeds typically occupy roughly 43–58% of a large world region, leaving irregular negative space while maintaining one dominant connected architectural mass.
+
+## Compound room shapes
+
+Room primitives are not rendered independently.
+
+They are raster-unioned at 20-world-unit resolution, then the exterior boundary is extracted from the resulting occupancy field.
+
+This produces:
+
+- stepped compound rooms
+- irregular wings
+- broad merged chambers
+- branching room masses
+- natural junctions
+- merged crossings
+- asymmetrical silhouettes
+
+Large primitives can additionally receive partitions and column fields.
+
+## Streaming and determinism
+
+Streaming chunks are 720 world units wide and exist only for caching/querying.
+
+They do not determine:
+
+- where architecture starts
+- room ownership
+- connectivity
+- color regions
+- branching
+- style changes
+
+Every chunk is regenerated from deterministic world-space growth primitives plus a one-cell occupancy halo, so exploration order does not affect chunk-edge walls or layout.
+
+All decisions come from:
+
+`generator version + seed + stable world coordinates + feature salt`
+
+Generator version 7 is part of the hash namespace.
+
+## Connectivity guarantee
+
+Every hidden macro cell has a parent that strictly decreases Manhattan rank toward the origin.
+
+Primary architectural events along each parent edge overlap physically, so the hidden tree is represented by ordinary connected floor mass rather than a separate corridor network.
+
+Side branches originate from already-connected architectural events. Optional links only add loops.
+
+Therefore every generated architectural family is attached to the same global connected structure.
+
+## Current validation snapshot
+
+The exact smoke suite currently verifies:
+
+- generator version 7
+- JavaScript syntax for generator, renderer, and tests
+- strict parent-rank decrease toward the origin
+- no exposed `rooms`, `corridors`, or `doors` connection layers in rendered chunk data
+- exploration-order determinism after generating a remote region
+- streaming chunk/raster alignment
+- substantial macro density variation
+- one dominant continuous occupied mass inside large sampled crops
+
+Current three-seed samples:
+
+- `backrooms-71`: ~57.8% sampled density, ~98.3% of occupied crop cells in the largest connected mass
+- `alpha`: ~51.8% sampled density, ~99.97% in the largest connected mass
+- `reference`: ~49.9% sampled density, ~99.88% in the largest connected mass
+
+An additional 20-seed stress pass completed without generation failures, with sampled densities roughly 42.9–58.3%.
 
 ## Controls
 
@@ -113,24 +173,4 @@ npm test
 
 ## GitHub Pages
 
-`.github/workflows/pages.yml` runs the generator smoke suite before deploying `main`.
-
-
-## Current v6 validation snapshot
-
-The current smoke suite samples three seeds across six large regions and checks the grid-independent field directly.
-
-- 342 accepted irregular growth sites
-- 3,400 local rooms
-- 359 required/optional growth connections
-- 2,352 connection-fabric rooms
-- 1,294 fabric openings/doors
-- 9.94 local rooms per accepted site on average
-- 6.55 fabric rooms per connection on average
-- maximum sampled uninterrupted spine segment: 83.97 world units
-- zero local room-room overlaps
-- zero growth-spine intersections through local rooms
-- zero connection-fabric room overlaps through local rooms
-- accepted sites stay at least 500 world units apart
-- query-sized world buckets include both zero-site and multi-site cases
-- exploration-order determinism passes exact re-query comparison
+`.github/workflows/pages.yml` runs the smoke suite before deploying `main`.

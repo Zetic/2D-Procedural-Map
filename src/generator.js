@@ -181,7 +181,7 @@ function optionalLinks(seed, mx, my) {
     const keyHash = edgeSeed(seed, mx, my, nx, ny, salt);
     const chance = (keyHash >>> 0) / 4294967296;
     const threshold =
-      salt === 103 || salt === 104 ? 0.17 : 0.22;
+      salt === 103 || salt === 104 ? 0.09 : 0.12;
 
     if (chance < threshold) out.push([nx, ny]);
   }
@@ -331,11 +331,11 @@ function branchRooms(seed, start, baseAngle, branchSeed, profile, depth = 0) {
     const scale = 0.68 + profile.scale * 0.62;
     const major = rng() < (0.07 + profile.chamber * 0.10);
     const along = major
-      ? (140 + rng() * 150) * scale
-      : (80 + rng() * 100) * scale;
+      ? (132 + rng() * 138) * scale
+      : (78 + rng() * 92) * scale;
     const cross = major
-      ? (110 + rng() * 130) * scale
-      : (55 + rng() * 95) * scale;
+      ? (98 + rng() * 112) * scale
+      : (50 + rng() * 78) * scale;
 
     const idSeed = mix32(branchSeed ^ Math.imul(i + 1, 0x9e3779b1));
     const shape = major && rng() < 0.08 ? 'ellipse' : 'rect';
@@ -401,7 +401,7 @@ function edgeFabric(seed, ax, ay, bx, by, salt, primary) {
 
     if (major) {
       along = (150 + rng() * 180) * scale;
-      cross = (115 + rng() * 150) * scale;
+      cross = (100 + rng() * 122) * scale;
       kind = 'chamber';
     } else {
       const roll = rng();
@@ -416,7 +416,7 @@ function edgeFabric(seed, ax, ay, bx, by, salt, primary) {
         kind = 'transverse-room';
       } else {
         along = (88 + rng() * 110) * scale;
-        cross = (70 + rng() * 105) * scale;
+        cross = (58 + rng() * 88) * scale;
         kind = 'room';
       }
     }
@@ -440,9 +440,9 @@ function edgeFabric(seed, ax, ay, bx, by, salt, primary) {
     );
 
     const branchChance =
-      (primary ? 0.24 : 0.17) +
-      profile.branch * 0.22 +
-      profile.density * 0.10;
+      (primary ? 0.18 : 0.12) +
+      profile.branch * 0.18 +
+      profile.density * 0.08;
 
     if (i > 0 && i < routeSamples.length - 1 && rng() < branchChance) {
       const side = rng() < 0.5 ? -1 : 1;
@@ -507,8 +507,8 @@ function localBurst(seed, mx, my) {
 
   const chains =
     1 +
-    Math.floor(profile.density * 2) +
-    (rng() < profile.branch * 0.45 ? 1 : 0);
+    Math.floor(profile.density * 1.45) +
+    (rng() < profile.branch * 0.32 ? 1 : 0);
 
   for (let c = 0; c < chains; c++) {
     const angle =

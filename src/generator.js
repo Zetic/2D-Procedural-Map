@@ -1,10 +1,10 @@
-export const CELL_SIZE = 820;
-export const QUERY_HALO = 2;
-export const GENERATOR_VERSION = 4;
+export const CELL_SIZE = 760;
+export const QUERY_HALO = 1;
+export const GENERATOR_VERSION = 5;
 
 const TAU = Math.PI * 2;
-const MAX_COMPLEX_RADIUS = 304;
-const ROUTE_STEP = 42;
+const MAX_COMPLEX_RADIUS = 315;
+const ROUTE_STEP = 64;
 const WALL = '#665947';
 const FLOOR_PALETTES = [
   '#ead29c', '#e6c98b', '#ecd5a8', '#dfc08b', '#e9d0a2',
@@ -84,15 +84,27 @@ function seededRng(seedValue) {
 }
 
 function choosePalette(seed, cx, cy) {
-  const rare = hash01(seed, cx, cy, 701);
+  // Most of the world stays in the common cream family. Rare color regions
+  // are correlated over several structural cells so color does not expose the
+  // indexing lattice as a checkerboard of separate islands.
+  const zoneX = Math.floor(cx / 3);
+  const zoneY = Math.floor(cy / 3);
+  const rareZone = hash01(seed, zoneX, zoneY, 701);
+
   let index;
-  if (rare < 0.80) index = Math.floor(hash01(seed, cx, cy, 702) * 5);
-  else index = 5 + Math.floor(hash01(seed, cx, cy, 703) * (FLOOR_PALETTES.length - 5));
+  if (rareZone < 0.11) {
+    index = 5 + Math.floor(
+      hash01(seed, zoneX, zoneY, 703) * (FLOOR_PALETTES.length - 5),
+    );
+  } else {
+    index = Math.floor(hash01(seed, cx, cy, 702) * 5);
+  }
+
   return FLOOR_PALETTES[Math.min(index, FLOOR_PALETTES.length - 1)];
 }
 
 function anchorFor(seed, cx, cy) {
-  const jitter = CELL_SIZE * 0.10;
+  const jitter = CELL_SIZE * 0.07;
   return {
     x: cx * CELL_SIZE + CELL_SIZE * 0.5 + hashSigned(seed, cx, cy, 11) * jitter,
     y: cy * CELL_SIZE + CELL_SIZE * 0.5 + hashSigned(seed, cx, cy, 12) * jitter,
@@ -104,8 +116,78 @@ function parentFor(seed, cx, cy) {
   if (cx === 0) return [0, cy - sign(cy)];
   if (cy === 0) return [cx - sign(cx), 0];
 
-  if (hash01(seed, cx, cy, 21) < 0.5) return [cx - sign(cx), cy];
+  // Diagonal parents are common. The hidden connectivity topology therefore
+  // does not reduce to a visible Manhattan road lattice.
+  const roll = hash01(seed, cx, cy, 21);
+  if (roll < 0.56) return [cx - sign(cx), cy - sign(cy)];
+  if (roll < 0.78) return [cx - sign(cx), cy];
   return [cx, cy - sign(cy)];
+}
+
+function parentConnectionCandidates(seed, cx, cy) {
+  if (cx === 0 && cy === 0) return [];
+
+  const preferred = parentFor(seed, cx, cy);
+  const currentRank = distanceRank(cx, cy);
+  const candidates = [];
+  const seen = new Set();
+
+  function add(x, y, preferredRank = false) {
+    if (x === cx && y === cy) return;
+    if (distanceRank(x, y) >= currentRank) return;
+
+    const key = keyOf(x, y);
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    const dx = x - cx;
+    const dy = y - cy;
+    const span = Math.hypot(dx, dy);
+
+    candidates.push({
+      x,
+      y,
+      preferred: preferredRank,
+      score:
+        span +
+        hash01(
+          seed,
+          cx * 131 + x,
+          cy * 137 + y,
+          24,
+        ) *
+          0.22,
+    });
+  }
+
+  if (preferred) add(preferred[0], preferred[1], true);
+
+  // Nearby lower-rank alternatives are deterministic escape hatches when a
+  // dense architectural pocket makes the ideal hidden parent edge impossible.
+  // Every fallback still decreases rank, so global connectivity remains
+  // acyclic and always progresses toward the origin.
+  for (let radius = 1; radius <= 3; radius++) {
+    for (let oy = -radius; oy <= radius; oy++) {
+      for (let ox = -radius; ox <= radius; ox++) {
+        if (
+          Math.max(Math.abs(ox), Math.abs(oy)) !== radius
+        ) {
+          continue;
+        }
+
+        add(cx + ox, cy + oy, false);
+      }
+    }
+  }
+
+  candidates.sort((a, b) => {
+    if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+    if (a.score !== b.score) return a.score - b.score;
+    if (a.x !== b.x) return a.x - b.x;
+    return a.y - b.y;
+  });
+
+  return candidates.map((candidate) => [candidate.x, candidate.y]);
 }
 
 function isTreeEdge(seed, ax, ay, bx, by) {
@@ -126,12 +208,20 @@ function optionalNeighborEdges(seed, cx, cy) {
 
   for (const [nx, ny, salt] of candidates) {
     if (isTreeEdge(seed, cx, cy, nx, ny)) continue;
+
     const edge = canonicalEdgeKey(cx, cy, nx, ny);
-    const chance = ((hashString(edge) ^ seed ^ salt) >>> 0) / 4294967296;
-    const rankDelta = Math.abs(distanceRank(nx, ny) - distanceRank(cx, cy));
-    const threshold = rankDelta === 0 ? 0.18 : 0.08;
+    const chance =
+      ((hashString(edge) ^ seed ^ salt) >>> 0) / 4294967296;
+    const rankDelta =
+      Math.abs(distanceRank(nx, ny) - distanceRank(cx, cy));
+
+    // Extra links stay local. Long graph edges were a major source of the
+    // visible "blob -> road -> blob" pattern even after room decoration.
+    const threshold = rankDelta === 0 ? 0.25 : 0.14;
+
     if (chance < threshold) output.push([nx, ny]);
   }
+
   return output;
 }
 
@@ -966,14 +1056,19 @@ function externalPortalCandidates(complex, target, salt) {
   return fallback;
 }
 
-function pointOutsideComplex(complex, portal, clearance) {
-  const vx = portal.x - complex.anchor.x;
-  const vy = portal.y - complex.anchor.y;
-  const targetRadius = complex.radius + clearance;
+function pointOutsideRoom(complex, portal, clearance) {
+  // Move only far enough to clear the selected room's local footprint. This
+  // avoids the old district-radius "spoke" without letting the routed center
+  // line immediately clip back through the room it just exited.
+  const room = complex.rooms[portal.roomIndex];
+  const vx = portal.x - room.x;
+  const vy = portal.y - room.y;
+  const radius = Math.hypot(room.w, room.h) * 0.5 + clearance;
   const b = vx * portal.normal.x + vy * portal.normal.y;
-  const c = vx * vx + vy * vy - targetRadius * targetRadius;
+  const c = vx * vx + vy * vy - radius * radius;
   const disc = Math.max(0, b * b - c);
-  const t = Math.max(8, -b + Math.sqrt(disc) + 4);
+  const t = Math.max(10, -b + Math.sqrt(disc) + 4);
+
   return {
     x: portal.x + portal.normal.x * t,
     y: portal.y + portal.normal.y * t,
@@ -1001,20 +1096,83 @@ function neckClear(complex, portal, outside, width) {
   return true;
 }
 
-function chooseClearPortal(complex, target, salt, width) {
+function clearPortalOptions(
+  complex,
+  target,
+  salt,
+  width,
+  maxOptions = 6,
+  globalObstacles = null,
+) {
   const candidates = externalPortalCandidates(complex, target, salt);
-  const clearance = width * 0.5 + 15;
+  const clearance = width * 0.5 + 8;
+  const options = [];
 
   for (const portal of candidates) {
-    const outside = pointOutsideComplex(complex, portal, clearance);
-    if (neckClear(complex, portal, outside, width)) return { portal, outside };
+    const localOutside = pointOutsideRoom(complex, portal, clearance);
+    const runway =
+      62 +
+      hash01(
+        salt,
+        portal.roomIndex,
+        portal.side,
+        1181,
+      ) *
+        42;
+
+    const probe = {
+      x: localOutside.x + portal.normal.x * runway,
+      y: localOutside.y + portal.normal.y * runway,
+    };
+
+    if (!neckClear(complex, portal, probe, width)) continue;
+
+    // The route begins at the end of this short runway. Validate the runway
+    // against all nearby room obstacles so it cannot overshoot into another
+    // complex before pathfinding even starts.
+    if (
+      globalObstacles &&
+      !segmentClear(localOutside, probe, globalObstacles)
+    ) {
+      continue;
+    }
+
+    options.push({
+      portal,
+      localOutside,
+      outside: probe,
+    });
+
+    if (options.length >= maxOptions) break;
   }
 
-  const portal = candidates[0];
-  return {
-    portal,
-    outside: pointOutsideComplex(complex, portal, clearance),
-  };
+  if (!options.length && candidates.length) {
+    const portal = candidates[0];
+    const localOutside = pointOutsideRoom(
+      complex,
+      portal,
+      clearance,
+    );
+
+    options.push({
+      portal,
+      localOutside,
+      outside: localOutside,
+    });
+  }
+
+  return options;
+}
+
+function chooseClearPortal(complex, target, salt, width) {
+  return clearPortalOptions(
+    complex,
+    target,
+    salt,
+    width,
+    1,
+    null,
+  )[0];
 }
 
 function segmentCircleDistanceSq(ax, ay, bx, by, cx, cy) {
@@ -1092,49 +1250,163 @@ function gridKey(gx, gy) {
   return gx + ',' + gy;
 }
 
-function nearestClearGridPoint(point, obstacles) {
+function buildBlockedGrid(obstacles, minX, maxX, minY, maxY) {
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const data = new Uint8Array(width * height);
+
+  const indexOf = (gx, gy) =>
+    (gy - minY) * width + (gx - minX);
+
+  for (const obstacle of obstacles) {
+    // Inflate raster obstacles by half a grid diagonal. This guarantees that
+    // a legal edge between two unblocked grid nodes cannot slice through a
+    // room circle between those nodes.
+    const rasterRadius = obstacle.r + ROUTE_STEP * 0.72;
+    const minGX = Math.max(
+      minX,
+      Math.floor((obstacle.x - rasterRadius) / ROUTE_STEP),
+    );
+    const maxGX = Math.min(
+      maxX,
+      Math.ceil((obstacle.x + rasterRadius) / ROUTE_STEP),
+    );
+    const minGY = Math.max(
+      minY,
+      Math.floor((obstacle.y - rasterRadius) / ROUTE_STEP),
+    );
+    const maxGY = Math.min(
+      maxY,
+      Math.ceil((obstacle.y + rasterRadius) / ROUTE_STEP),
+    );
+    const r2 = rasterRadius * rasterRadius;
+
+    for (let gy = minGY; gy <= maxGY; gy++) {
+      const wy = gy * ROUTE_STEP;
+
+      for (let gx = minGX; gx <= maxGX; gx++) {
+        const wx = gx * ROUTE_STEP;
+        const dx = wx - obstacle.x;
+        const dy = wy - obstacle.y;
+
+        if (dx * dx + dy * dy < r2) {
+          data[indexOf(gx, gy)] = 1;
+        }
+      }
+    }
+  }
+
+  return {
+    data,
+    width,
+    height,
+    minX,
+    minY,
+    maxX,
+    maxY,
+    indexOf,
+  };
+}
+
+function gridBlocked(grid, gx, gy) {
+  if (
+    gx < grid.minX ||
+    gx > grid.maxX ||
+    gy < grid.minY ||
+    gy > grid.maxY
+  ) {
+    return true;
+  }
+
+  return grid.data[grid.indexOf(gx, gy)] !== 0;
+}
+
+function nearestClearGridPoint(point, grid, obstacles) {
   const baseX = Math.round(point.x / ROUTE_STEP);
   const baseY = Math.round(point.y / ROUTE_STEP);
 
-  for (let radius = 0; radius <= 4; radius++) {
+  for (let radius = 0; radius <= 5; radius++) {
     for (let oy = -radius; oy <= radius; oy++) {
       for (let ox = -radius; ox <= radius; ox++) {
-        if (radius > 0 && Math.abs(ox) !== radius && Math.abs(oy) !== radius) continue;
+        if (
+          radius > 0 &&
+          Math.abs(ox) !== radius &&
+          Math.abs(oy) !== radius
+        ) {
+          continue;
+        }
+
+        const gx = baseX + ox;
+        const gy = baseY + oy;
+
+        if (gridBlocked(grid, gx, gy)) continue;
+
         const candidate = {
-          gx: baseX + ox,
-          gy: baseY + oy,
-          x: (baseX + ox) * ROUTE_STEP,
-          y: (baseY + oy) * ROUTE_STEP,
+          gx,
+          gy,
+          x: gx * ROUTE_STEP,
+          y: gy * ROUTE_STEP,
         };
+
+        // Only a handful of candidates are examined here, so retain the exact
+        // segment test for the short lead-in from the portal to the route grid.
         if (segmentClear(point, candidate, obstacles)) return candidate;
       }
     }
   }
 
-  return { gx: baseX, gy: baseY, x: baseX * ROUTE_STEP, y: baseY * ROUTE_STEP };
+  return {
+    gx: baseX,
+    gy: baseY,
+    x: baseX * ROUTE_STEP,
+    y: baseY * ROUTE_STEP,
+  };
 }
 
 function routeAStar(start, goal, obstacles, routeSeed) {
-  const startGrid = nearestClearGridPoint(start, obstacles);
-  const goalGrid = nearestClearGridPoint(goal, obstacles);
+  const rawSX = Math.round(start.x / ROUTE_STEP);
+  const rawSY = Math.round(start.y / ROUTE_STEP);
+  const rawGX = Math.round(goal.x / ROUTE_STEP);
+  const rawGY = Math.round(goal.y / ROUTE_STEP);
+  const margin = 16;
+
+  const minX = Math.min(rawSX, rawGX) - margin;
+  const maxX = Math.max(rawSX, rawGX) + margin;
+  const minY = Math.min(rawSY, rawGY) - margin;
+  const maxY = Math.max(rawSY, rawGY) + margin;
+  const grid = buildBlockedGrid(obstacles, minX, maxX, minY, maxY);
+
+  const startGrid = nearestClearGridPoint(start, grid, obstacles);
+  const goalGrid = nearestClearGridPoint(goal, grid, obstacles);
+
   const sx = startGrid.gx;
   const sy = startGrid.gy;
   const gx = goalGrid.gx;
   const gy = goalGrid.gy;
-  const margin = 20;
-  const minX = Math.min(sx, gx) - margin;
-  const maxX = Math.max(sx, gx) + margin;
-  const minY = Math.min(sy, gy) - margin;
-  const maxY = Math.max(sy, gy) + margin;
 
+  if (gridBlocked(grid, sx, sy) || gridBlocked(grid, gx, gy)) {
+    return null;
+  }
+
+  const totalNodes = grid.width * grid.height;
+  const gScore = new Float64Array(totalNodes);
+  gScore.fill(Infinity);
+
+  const cameFrom = new Int32Array(totalNodes);
+  cameFrom.fill(-1);
+
+  const closed = new Uint8Array(totalNodes);
   const open = new MinHeap();
-  const startKey = gridKey(sx, sy);
-  const gScore = new Map([[startKey, 0]]);
-  const cameFrom = new Map();
-  const closed = new Set();
+
+  const startIndex = grid.indexOf(sx, sy);
+  const goalIndex = grid.indexOf(gx, gy);
+  gScore[startIndex] = 0;
 
   function world(gxValue, gyValue) {
-    return { x: gxValue * ROUTE_STEP, y: gyValue * ROUTE_STEP };
+    return {
+      x: gxValue * ROUTE_STEP,
+      y: gyValue * ROUTE_STEP,
+    };
   }
 
   function heuristic(x, y) {
@@ -1143,57 +1415,91 @@ function routeAStar(start, goal, obstacles, routeSeed) {
     return Math.hypot(dx, dy);
   }
 
-  open.push({ gx: sx, gy: sy, g: 0, f: heuristic(sx, sy), tie: hashInt(routeSeed, sx, sy, 1) });
+  open.push({
+    gx: sx,
+    gy: sy,
+    index: startIndex,
+    g: 0,
+    f: heuristic(sx, sy),
+    tie: hashInt(routeSeed, sx, sy, 1),
+  });
 
   const neighbors = [
-    [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
-    [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
+    [1, 0, 1],
+    [-1, 0, 1],
+    [0, 1, 1],
+    [0, -1, 1],
+    [1, 1, Math.SQRT2],
+    [1, -1, Math.SQRT2],
+    [-1, 1, Math.SQRT2],
+    [-1, -1, Math.SQRT2],
   ];
 
   let iterations = 0;
+
   while (open.size && iterations++ < 9000) {
     const current = open.pop();
-    const currentKey = gridKey(current.gx, current.gy);
-    if (closed.has(currentKey)) continue;
-    closed.add(currentKey);
 
-    if (current.gx === gx && current.gy === gy) {
+    if (closed[current.index]) continue;
+    closed[current.index] = 1;
+
+    if (current.index === goalIndex) {
       const path = [];
-      let walkKey = currentKey;
-      let walk = { gx: current.gx, gy: current.gy };
-      path.push(world(walk.gx, walk.gy));
-      while (walkKey !== startKey) {
-        const prev = cameFrom.get(walkKey);
-        if (!prev) break;
-        walk = prev;
-        walkKey = gridKey(walk.gx, walk.gy);
-        path.push(world(walk.gx, walk.gy));
+      let walkIndex = goalIndex;
+
+      while (walkIndex !== -1) {
+        const localX = walkIndex % grid.width;
+        const localY = Math.floor(walkIndex / grid.width);
+        const walkGX = grid.minX + localX;
+        const walkGY = grid.minY + localY;
+
+        path.push(world(walkGX, walkGY));
+
+        if (walkIndex === startIndex) break;
+        walkIndex = cameFrom[walkIndex];
       }
+
       path.reverse();
       return path;
     }
 
-    const currentWorld = world(current.gx, current.gy);
-
     for (const [ox, oy, baseCost] of neighbors) {
       const nx = current.gx + ox;
       const ny = current.gy + oy;
-      if (nx < minX || nx > maxX || ny < minY || ny > maxY) continue;
-      const nextKey = gridKey(nx, ny);
-      if (closed.has(nextKey)) continue;
 
-      const nextWorld = world(nx, ny);
-      if (!segmentClear(currentWorld, nextWorld, obstacles)) continue;
+      if (gridBlocked(grid, nx, ny)) continue;
+
+      const nextIndex = grid.indexOf(nx, ny);
+      if (closed[nextIndex]) continue;
+
+      // Prevent diagonal corner cutting through a blocked room footprint.
+      if (
+        ox !== 0 &&
+        oy !== 0 &&
+        (
+          gridBlocked(grid, current.gx + ox, current.gy) ||
+          gridBlocked(grid, current.gx, current.gy + oy)
+        )
+      ) {
+        continue;
+      }
 
       const noise = hash01(routeSeed, nx, ny, 712) * 0.045;
       const tentative = current.g + baseCost + noise;
-      const previous = gScore.get(nextKey);
-      if (previous !== undefined && tentative >= previous) continue;
 
-      gScore.set(nextKey, tentative);
-      cameFrom.set(nextKey, { gx: current.gx, gy: current.gy });
-      const f = tentative + heuristic(nx, ny);
-      open.push({ gx: nx, gy: ny, g: tentative, f, tie: hashInt(routeSeed, nx, ny, 713) });
+      if (tentative >= gScore[nextIndex]) continue;
+
+      gScore[nextIndex] = tentative;
+      cameFrom[nextIndex] = current.index;
+
+      open.push({
+        gx: nx,
+        gy: ny,
+        index: nextIndex,
+        g: tentative,
+        f: tentative + heuristic(nx, ny),
+        tie: hashInt(routeSeed, nx, ny, 713),
+      });
     }
   }
 
@@ -1268,7 +1574,170 @@ function fallbackRoute(start, goal, obstacles, routeSeed) {
     if (pathClear(path, obstacles)) return path;
   }
 
-  return [start, goal];
+  return null;
+}
+
+function firstSegmentIntersection(a, b, obstacles) {
+  for (let obstacleIndex = 0; obstacleIndex < obstacles.length; obstacleIndex++) {
+    const obstacle = obstacles[obstacleIndex];
+
+    if (
+      segmentCircleDistanceSq(
+        a.x,
+        a.y,
+        b.x,
+        b.y,
+        obstacle.x,
+        obstacle.y,
+      ) < obstacle.r * obstacle.r
+    ) {
+      return { obstacleIndex, obstacle };
+    }
+  }
+
+  return null;
+}
+
+function localDetourScore(points, obstacles, ignoredObstacleIndex) {
+  let score = 0;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+
+    for (let obstacleIndex = 0; obstacleIndex < obstacles.length; obstacleIndex++) {
+      if (obstacleIndex === ignoredObstacleIndex) continue;
+
+      const obstacle = obstacles[obstacleIndex];
+
+      if (
+        segmentCircleDistanceSq(
+          a.x,
+          a.y,
+          b.x,
+          b.y,
+          obstacle.x,
+          obstacle.y,
+        ) < obstacle.r * obstacle.r
+      ) {
+        score += 1;
+      }
+    }
+  }
+
+  return score;
+}
+
+function detourAroundObstacles(start, goal, obstacles, routeSeed) {
+  const output = [start];
+  const stack = [{ a: start, b: goal, depth: 0, salt: 0 }];
+  let guard = 0;
+
+  while (stack.length && guard++ < 420) {
+    const segment = stack.pop();
+    const hit = firstSegmentIntersection(segment.a, segment.b, obstacles);
+
+    if (!hit) {
+      const last = output[output.length - 1];
+      if (Math.hypot(segment.b.x - last.x, segment.b.y - last.y) > 1) {
+        output.push(segment.b);
+      }
+      continue;
+    }
+
+    if (segment.depth >= 16) return null;
+
+    const dx = segment.b.x - segment.a.x;
+    const dy = segment.b.y - segment.a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const px = -uy;
+    const py = ux;
+
+    const depthScale = 1 + segment.depth * 0.08;
+    const clearance =
+      (hit.obstacle.r + ROUTE_STEP * 0.92) * depthScale;
+    const tangentReach = clearance * 1.16;
+
+    const candidates = [];
+
+    for (const side of [-1, 1]) {
+      const before = {
+        x:
+          hit.obstacle.x -
+          ux * tangentReach +
+          px * clearance * side,
+        y:
+          hit.obstacle.y -
+          uy * tangentReach +
+          py * clearance * side,
+      };
+
+      const after = {
+        x:
+          hit.obstacle.x +
+          ux * tangentReach +
+          px * clearance * side,
+        y:
+          hit.obstacle.y +
+          uy * tangentReach +
+          py * clearance * side,
+      };
+
+      const points = [segment.a, before, after, segment.b];
+
+      candidates.push({
+        before,
+        after,
+        score: localDetourScore(
+          points,
+          obstacles,
+          hit.obstacleIndex,
+        ),
+        tie: hashInt(
+          routeSeed,
+          segment.depth * 97 + segment.salt,
+          hit.obstacleIndex,
+          side < 0 ? 1701 : 1702,
+        ),
+      });
+    }
+
+    candidates.sort((left, right) => {
+      if (left.score !== right.score) return left.score - right.score;
+      return left.tie - right.tie;
+    });
+
+    const chosen = candidates[0];
+    const nextDepth = segment.depth + 1;
+    const nextSalt = segment.salt + 1;
+
+    // Stack is LIFO, so push the three replacement segments in reverse order.
+    stack.push({
+      a: chosen.after,
+      b: segment.b,
+      depth: nextDepth,
+      salt: nextSalt + 2,
+    });
+    stack.push({
+      a: chosen.before,
+      b: chosen.after,
+      depth: nextDepth,
+      salt: nextSalt + 1,
+    });
+    stack.push({
+      a: segment.a,
+      b: chosen.before,
+      depth: nextDepth,
+      salt: nextSalt,
+    });
+  }
+
+  if (stack.length) return null;
+
+  const simplified = simplifyPath(output);
+  return pathClear(simplified, obstacles) ? simplified : null;
 }
 
 function chamberClear(chamber, obstacles, corridorWidth) {
@@ -1282,39 +1751,410 @@ function chamberClear(chamber, obstacles, corridorWidth) {
   return true;
 }
 
-function buildChambers(points, width, color, routeSeed, obstacles) {
-  const chambers = [];
+function organicizeRoute(points, obstacles, routeSeed) {
+  if (points.length < 2) return points.slice();
 
-  for (let i = 1; i < points.length - 1; i++) {
-    const prev = points[i - 1];
-    const point = points[i];
-    const next = points[i + 1];
-    const ax = point.x - prev.x;
-    const ay = point.y - prev.y;
-    const bx = next.x - point.x;
-    const by = next.y - point.y;
-    const lenA = Math.hypot(ax, ay) || 1;
-    const lenB = Math.hypot(bx, by) || 1;
-    const turn = Math.abs((ax / lenA) * (by / lenB) - (ay / lenA) * (bx / lenB));
+  const output = [{ ...points[0] }];
 
-    if (turn > 0.12 || hash01(routeSeed, i, points.length, 922) < 0.20) {
-      const size = width * (1.55 + hash01(routeSeed, i, points.length, 923) * 1.45);
-      const chamber = {
-        x: point.x,
-        y: point.y,
-        w: size * (0.90 + hash01(routeSeed, i, points.length, 924) * 0.50),
-        h: size * (0.78 + hash01(routeSeed, i, points.length, 925) * 0.56),
-        angle: Math.atan2(by, bx),
-        color,
-        major: false,
-        partitions: [],
-        columns: [],
-      };
-      if (chamberClear(chamber, obstacles, width)) chambers.push(chamber);
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+
+    if (len < 150) {
+      output.push({ ...b });
+      continue;
+    }
+
+    const ux = dx / len;
+    const uy = dy / len;
+    const nx = -uy;
+    const ny = ux;
+    const bends = Math.max(1, Math.min(3, Math.floor(len / 230)));
+    const candidate = [{ ...a }];
+
+    let previousOffset = 0;
+
+    for (let bend = 1; bend <= bends; bend++) {
+      const t = bend / (bends + 1);
+      const envelope = Math.sin(Math.PI * t);
+      const rawOffset =
+        hashSigned(
+          routeSeed,
+          i * 31 + bend,
+          points.length,
+          1901,
+        ) *
+        Math.min(82, len * 0.13) *
+        envelope;
+
+      const offset = previousOffset * 0.28 + rawOffset * 0.72;
+      previousOffset = offset;
+
+      const tangentJitter =
+        hashSigned(
+          routeSeed,
+          i * 37 + bend,
+          points.length,
+          1902,
+        ) *
+        Math.min(34, len * 0.045);
+
+      candidate.push({
+        x: a.x + dx * t + nx * offset + ux * tangentJitter,
+        y: a.y + dy * t + ny * offset + uy * tangentJitter,
+      });
+    }
+
+    candidate.push({ ...b });
+
+    if (pathClear(candidate, obstacles)) {
+      for (let p = 1; p < candidate.length; p++) {
+        output.push(candidate[p]);
+      }
+    } else {
+      output.push({ ...b });
     }
   }
 
-  return chambers;
+  return simplifyPath(output);
+}
+
+function appendSegmentedPoint(output, point, maxStep = 78) {
+  const last = output[output.length - 1];
+  if (!last) {
+    output.push({ ...point });
+    return;
+  }
+
+  const dx = point.x - last.x;
+  const dy = point.y - last.y;
+  const len = Math.hypot(dx, dy);
+
+  if (len <= 1) return;
+
+  const pieces = Math.max(1, Math.ceil(len / maxStep));
+
+  for (let i = 1; i <= pieces; i++) {
+    const t = i / pieces;
+    output.push({
+      x: last.x + dx * t,
+      y: last.y + dy * t,
+    });
+  }
+}
+
+function resamplePath(points, maxStep, routeSeed) {
+  if (!points.length) return [];
+  const output = [{ ...points[0] }];
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len <= 1e-6) continue;
+
+    const localStep = Math.max(
+      58,
+      maxStep * (0.84 + hash01(routeSeed, i, points.length, 1401) * 0.24),
+    );
+    const pieces = Math.max(1, Math.ceil(len / localStep));
+
+    for (let j = 1; j <= pieces; j++) {
+      const t = j / pieces;
+      output.push({
+        x: a.x + dx * t,
+        y: a.y + dy * t,
+      });
+    }
+  }
+
+  return output;
+}
+
+function fabricRoomClear(room, obstacles, accepted, corridorWidth, ignoreIndex = -1) {
+  if (!chamberClear(room, obstacles, corridorWidth)) return false;
+
+  for (let i = 0; i < accepted.length; i++) {
+    if (i === ignoreIndex) continue;
+    if (roomsOverlap(room, accepted[i], 2)) return false;
+  }
+
+  return true;
+}
+
+function connectionRoomDetails(room, routeSeed, index) {
+  room.partitions = [];
+  room.columns = [];
+  room.cutouts = [];
+  room.blockedSides = [];
+  room.detailStyle = 'connection';
+
+  const rng = seededRng(hashInt(routeSeed, index, Math.round(room.w + room.h), 1501));
+
+  if (room.major || rng() < 0.38) {
+    const count = room.major ? 1 + Math.floor(rng() * 2) : 1;
+    for (let i = 0; i < count; i++) {
+      room.partitions.push({
+        axis: rng() < 0.5 ? 'x' : 'y',
+        t: 0.24 + rng() * 0.52,
+        gap: 0.22 + rng() * 0.20,
+      });
+    }
+  }
+
+  if (room.major && rng() < 0.36) {
+    const cols = Math.max(1, Math.min(3, Math.floor(room.w / 62)));
+    const rows = Math.max(1, Math.min(3, Math.floor(room.h / 62)));
+    for (let y = 1; y <= rows; y++) {
+      for (let x = 1; x <= cols; x++) {
+        if (rng() < 0.70) {
+          room.columns.push({
+            u: x / (cols + 1),
+            v: y / (rows + 1),
+            r: 2.5 + rng() * 2.5,
+          });
+        }
+      }
+    }
+  }
+}
+
+function buildConnectionFabric(points, width, color, routeSeed, obstacles) {
+  const spine = resamplePath(points, 92, routeSeed);
+  const chambers = [];
+  const fabricDoors = [];
+
+  if (spine.length < 3) {
+    return { spine, chambers, fabricDoors };
+  }
+
+  for (let i = 1; i < spine.length - 1; i++) {
+    const prev = spine[i - 1];
+    const point = spine[i];
+    const next = spine[i + 1];
+    const angle = Math.atan2(next.y - prev.y, next.x - prev.x);
+    const rng = seededRng(hashInt(routeSeed, i, spine.length, 1601));
+
+    const major = i % 4 === 0 || rng() < 0.18;
+    const along = major
+      ? 88 + rng() * 54
+      : 54 + rng() * 42;
+    const cross = major
+      ? 64 + rng() * 58
+      : 42 + rng() * 42;
+
+    let chamber = {
+      id: 'fabric:' + routeSeed + ':' + i,
+      x: point.x,
+      y: point.y,
+      w: along,
+      h: cross,
+      angle,
+      color,
+      major,
+      kind: major ? 'waystation' : (rng() < 0.45 ? 'connector-room' : 'hall-room'),
+    };
+
+    connectionRoomDetails(chamber, routeSeed, i);
+
+    if (!fabricRoomClear(chamber, obstacles, chambers, width)) {
+      // Do not allow a rejected large room to turn this section back into a
+      // featureless hallway. Try smaller architectural waypoints before
+      // leaving the route bare.
+      let fallback = null;
+
+      for (let retry = 1; retry <= 3; retry++) {
+        const scale = 1 - retry * 0.16;
+        const shifted = (retry - 2) * width * 0.30;
+        const nx = -Math.sin(angle);
+        const ny = Math.cos(angle);
+
+        const candidate = {
+          id: 'fabric:' + routeSeed + ':' + i + ':fallback:' + retry,
+          x: point.x + nx * shifted,
+          y: point.y + ny * shifted,
+          w: Math.max(34, along * scale),
+          h: Math.max(width * 1.55, cross * scale),
+          angle,
+          color,
+          major: false,
+          kind: retry === 3 ? 'passage-room' : 'connector-room',
+        };
+
+        connectionRoomDetails(
+          candidate,
+          routeSeed ^ (0x7100 + retry),
+          i * 7 + retry,
+        );
+
+        if (fabricRoomClear(candidate, obstacles, chambers, width)) {
+          fallback = candidate;
+          break;
+        }
+      }
+
+      if (!fallback) continue;
+      chamber = fallback;
+    }
+
+    const chamberIndex = chambers.length;
+    chambers.push(chamber);
+
+    // Side accretion makes the connection itself architectural. A hidden graph
+    // edge becomes a chain of rooms and branches rather than a long empty road.
+    const annexCount =
+      major ? 1 + (rng() < 0.42 ? 1 : 0) :
+      (rng() < 0.44 ? 1 : 0);
+
+    for (let a = 0; a < annexCount; a++) {
+      const side = (rng() < 0.5 ? -1 : 1) * (a % 2 === 0 ? 1 : -1);
+      const normal = {
+        x: -Math.sin(angle) * side,
+        y: Math.cos(angle) * side,
+      };
+      const tangent = {
+        x: Math.cos(angle),
+        y: Math.sin(angle),
+      };
+
+      const annexW = 38 + rng() * (major ? 62 : 42);
+      const annexH = 34 + rng() * (major ? 58 : 38);
+      const tangentOffset = (rng() - 0.5) * Math.max(0, chamber.w - annexW) * 0.42;
+      const distance = chamber.h * 0.5 + annexH * 0.5;
+
+      const annex = {
+        id: chamber.id + ':annex:' + a,
+        x: chamber.x + normal.x * distance + tangent.x * tangentOffset,
+        y: chamber.y + normal.y * distance + tangent.y * tangentOffset,
+        w: annexW,
+        h: annexH,
+        angle,
+        color,
+        major: false,
+        kind: rng() < 0.5 ? 'annex' : 'side-room',
+      };
+
+      connectionRoomDetails(annex, routeSeed ^ 0x2f3a1, i * 5 + a);
+
+      if (!fabricRoomClear(annex, obstacles, chambers, width, chamberIndex)) continue;
+
+      chambers.push(annex);
+      const wallX = chamber.x + normal.x * chamber.h * 0.5 + tangent.x * tangentOffset;
+      const wallY = chamber.y + normal.y * chamber.h * 0.5 + tangent.y * tangentOffset;
+
+      fabricDoors.push({
+        x: wallX,
+        y: wallY,
+        angle,
+        width: Math.max(14, Math.min(34, annexW * 0.52)),
+        color,
+        kind: rng() < 0.38 ? 'opening' : 'internal',
+      });
+
+      // Some side rooms continue for one more generation. These short branch
+      // chains fill lateral voids and stop the connection fabric from reading
+      // as a simple necklace along one center line.
+      if (rng() < (major ? 0.48 : 0.24)) {
+        const branchW = 34 + rng() * 54;
+        const branchH = 30 + rng() * 50;
+        const branchTurn = rng() < 0.34;
+        const branchTurnSign = rng() < 0.5 ? -1 : 1;
+        const branchNormal = branchTurn
+          ? {
+              x: tangent.x * branchTurnSign,
+              y: tangent.y * branchTurnSign,
+            }
+          : normal;
+        const branchTangent = {
+          x: -branchNormal.y,
+          y: branchNormal.x,
+        };
+
+        const branchParentHalf = branchTurn
+          ? annex.w * 0.5
+          : annex.h * 0.5;
+        const branchChildHalf = branchTurn
+          ? branchW * 0.5
+          : branchH * 0.5;
+        const branchOffset =
+          (rng() - 0.5) *
+          Math.max(0, (branchTurn ? annex.h : annex.w) - (branchTurn ? branchH : branchW)) *
+          0.34;
+
+        const branch = {
+          id: annex.id + ':branch',
+          x:
+            annex.x +
+            branchNormal.x * (branchParentHalf + branchChildHalf) +
+            branchTangent.x * branchOffset,
+          y:
+            annex.y +
+            branchNormal.y * (branchParentHalf + branchChildHalf) +
+            branchTangent.y * branchOffset,
+          w: branchW,
+          h: branchH,
+          angle: branchTurn ? angle + Math.PI / 2 : angle,
+          color,
+          major: false,
+          kind: rng() < 0.5 ? 'branch-room' : 'alcove',
+        };
+
+        connectionRoomDetails(
+          branch,
+          routeSeed ^ 0x61a7d,
+          i * 11 + a,
+        );
+
+        const annexIndex = chambers.length - 1;
+
+        if (
+          fabricRoomClear(
+            branch,
+            obstacles,
+            chambers,
+            width,
+            annexIndex,
+          )
+        ) {
+          chambers.push(branch);
+
+          const branchWallX =
+            annex.x +
+            branchNormal.x * branchParentHalf +
+            branchTangent.x * branchOffset;
+          const branchWallY =
+            annex.y +
+            branchNormal.y * branchParentHalf +
+            branchTangent.y * branchOffset;
+
+          fabricDoors.push({
+            x: branchWallX,
+            y: branchWallY,
+            angle: Math.atan2(
+              branchTangent.y,
+              branchTangent.x,
+            ),
+            width: Math.max(
+              12,
+              Math.min(
+                30,
+                (branchTurn ? branchH : branchW) * 0.48,
+              ),
+            ),
+            color,
+            kind: rng() < 0.30 ? 'opening' : 'internal',
+          });
+        }
+      }
+    }
+  }
+
+  return { spine, chambers, fabricDoors };
 }
 
 function corridorDoor(portal) {
@@ -1326,6 +2166,38 @@ function corridorDoor(portal) {
     color: portal.color,
     kind: 'external',
   };
+}
+
+function findSafeRoute(start, goal, obstacles, routeSeed) {
+  // Most neighboring growth regions can connect without a full graph search.
+  // Prefer cheap deterministic visibility/dogleg routes and reserve A* for
+  // genuinely blocked dense pockets.
+  const direct = [start, goal];
+  if (pathClear(direct, obstacles)) return direct;
+
+  const dogleg = fallbackRoute(start, goal, obstacles, routeSeed);
+  if (dogleg) return dogleg;
+
+  const gridRoute = routeAStar(start, goal, obstacles, routeSeed);
+  if (gridRoute) {
+    const candidate = [start];
+
+    for (const point of gridRoute) {
+      const last = candidate[candidate.length - 1];
+      if (Math.hypot(point.x - last.x, point.y - last.y) > 1) {
+        candidate.push(point);
+      }
+    }
+
+    const last = candidate[candidate.length - 1];
+    if (Math.hypot(goal.x - last.x, goal.y - last.y) > 1) {
+      candidate.push(goal);
+    }
+
+    if (pathClear(candidate, obstacles)) return candidate;
+  }
+
+  return detourAroundObstacles(start, goal, obstacles, routeSeed);
 }
 
 export class InfiniteMapGenerator {
@@ -1358,21 +2230,31 @@ export class InfiniteMapGenerator {
     return complex;
   }
 
-  getObstacleComplexes(ax, ay, bx, by, corridorWidth) {
-    const minX = Math.min(ax, bx) - 2;
-    const maxX = Math.max(ax, bx) + 2;
-    const minY = Math.min(ay, by) - 2;
-    const maxY = Math.max(ay, by) + 2;
+  getObstacleRooms(ax, ay, bx, by, corridorWidth) {
+    const minX = Math.min(ax, bx) - 1;
+    const maxX = Math.max(ax, bx) + 1;
+    const minY = Math.min(ay, by) - 1;
+    const maxY = Math.max(ay, by) + 1;
     const obstacles = [];
 
     for (let cy = minY; cy <= maxY; cy++) {
       for (let cx = minX; cx <= maxX; cx++) {
         const complex = this.getComplex(cx, cy);
-        obstacles.push({
-          x: complex.anchor.x,
-          y: complex.anchor.y,
-          r: complex.radius + corridorWidth * 0.5 + 14,
-        });
+
+        // Routing now sees actual room-scale occupied space rather than one
+        // oversized circle around the entire district. This allows growth to
+        // thread through architectural gaps instead of drawing highways around
+        // isolated blobs.
+        for (const room of complex.rooms) {
+          obstacles.push({
+            x: room.x,
+            y: room.y,
+            r:
+              Math.hypot(room.w, room.h) * 0.5 +
+              corridorWidth * 0.5 +
+              7,
+          });
+        }
       }
     }
 
@@ -1390,39 +2272,141 @@ export class InfiniteMapGenerator {
     const source = this.getComplex(ax, ay);
     const target = this.getComplex(bx, by);
     const routeSeed = edgeSalt(edgeKey, this.seed ^ 0x5a17c3);
-    const width = 20 + (routeSeed % 15);
-    const sourceExit = chooseClearPortal(source, target.anchor, routeSeed ^ 0x1122, width);
-    const targetExit = chooseClearPortal(target, source.anchor, routeSeed ^ 0x3344, width);
-    const sourcePortal = sourceExit.portal;
-    const targetPortal = targetExit.portal;
-    const sourceOutside = sourceExit.outside;
-    const targetOutside = targetExit.outside;
-    const obstacles = this.getObstacleComplexes(ax, ay, bx, by, width);
 
-    const routed = routeAStar(sourceOutside, targetOutside, obstacles, routeSeed) ||
-      fallbackRoute(sourceOutside, targetOutside, obstacles, routeSeed);
+    // Hall links are intentionally narrow. The connection gains visual mass
+    // from rooms, junctions, and annexes placed every short distance.
+    const width = 16 + (routeSeed % 11);
+    const obstacles = this.getObstacleRooms(ax, ay, bx, by, width);
 
-    const middle = simplifyPath(routed);
-    const points = [sourcePortal, sourceOutside];
+    const sourceOptions = clearPortalOptions(
+      source,
+      target.anchor,
+      routeSeed ^ 0x1122,
+      width,
+      12,
+      obstacles,
+    );
+    const targetOptions = clearPortalOptions(
+      target,
+      source.anchor,
+      routeSeed ^ 0x3344,
+      width,
+      12,
+      obstacles,
+    );
 
-    for (const point of middle) {
-      const last = points[points.length - 1];
-      if (Math.hypot(point.x - last.x, point.y - last.y) > 1) points.push(point);
+    const combinations = [];
+    for (let sourceIndex = 0; sourceIndex < sourceOptions.length; sourceIndex++) {
+      for (let targetIndex = 0; targetIndex < targetOptions.length; targetIndex++) {
+        combinations.push({
+          sourceIndex,
+          targetIndex,
+          rank:
+            sourceIndex +
+            targetIndex +
+            hash01(
+              routeSeed,
+              sourceIndex,
+              targetIndex,
+              1821,
+            ) * 0.15,
+        });
+      }
     }
 
-    const lastMiddle = points[points.length - 1];
-    if (Math.hypot(targetOutside.x - lastMiddle.x, targetOutside.y - lastMiddle.y) > 1) {
-      points.push(targetOutside);
-    }
-    points.push(targetPortal);
+    combinations.sort((left, right) => left.rank - right.rank);
 
-    const color = hash01(routeSeed, 1, 2, 3) < 0.5 ? source.color : target.color;
+    let chosen = null;
+
+    for (const combination of combinations) {
+      const sourceExit = sourceOptions[combination.sourceIndex];
+      const targetExit = targetOptions[combination.targetIndex];
+      const attemptSeed =
+        routeSeed ^
+        hashInt(
+          routeSeed,
+          combination.sourceIndex,
+          combination.targetIndex,
+          1822,
+        );
+
+      const routed = findSafeRoute(
+        sourceExit.outside,
+        targetExit.outside,
+        obstacles,
+        attemptSeed,
+      );
+
+      if (!routed) continue;
+
+      chosen = {
+        sourceExit,
+        targetExit,
+        routed,
+        attemptSeed,
+      };
+      break;
+    }
+
+    if (!chosen) {
+      this.edgeCache.set(edgeKey, {
+        corridor: null,
+        used: this.frame,
+      });
+      return null;
+    }
+
+    const sourcePortal = chosen.sourceExit.portal;
+    const targetPortal = chosen.targetExit.portal;
+    const simplified = simplifyPath(chosen.routed);
+    const organicRoute = organicizeRoute(
+      simplified,
+      obstacles,
+      chosen.attemptSeed,
+    );
+    const color =
+      hash01(routeSeed, 1, 2, 3) < 0.56
+        ? source.color
+        : target.color;
+
+    const fabric = buildConnectionFabric(
+      organicRoute,
+      width,
+      color,
+      chosen.attemptSeed,
+      obstacles,
+    );
+
+    const points = [{ x: sourcePortal.x, y: sourcePortal.y }];
+
+    appendSegmentedPoint(
+      points,
+      chosen.sourceExit.localOutside,
+      72,
+    );
+
+    for (const point of fabric.spine) {
+      appendSegmentedPoint(points, point, 84);
+    }
+
+    appendSegmentedPoint(
+      points,
+      chosen.targetExit.localOutside,
+      72,
+    );
+    appendSegmentedPoint(
+      points,
+      { x: targetPortal.x, y: targetPortal.y },
+      72,
+    );
+
     const corridor = {
       edgeKey,
       points,
       width,
       color,
-      chambers: buildChambers(points.slice(1, -1), width, color, routeSeed, obstacles),
+      chambers: fabric.chambers,
+      fabricDoors: fabric.fabricDoors,
       doors: [corridorDoor(sourcePortal), corridorDoor(targetPortal)],
     };
 
@@ -1441,11 +2425,48 @@ export class InfiniteMapGenerator {
     const complex = this.getComplex(cx, cy);
     const corridors = [];
 
-    const parent = parentFor(this.seed, cx, cy);
-    if (parent) corridors.push(this.getCorridor(cx, cy, parent[0], parent[1]));
+    const parentCandidates = parentConnectionCandidates(
+      this.seed,
+      cx,
+      cy,
+    );
+
+    if (parentCandidates.length) {
+      let parentCorridor = null;
+
+      for (const parent of parentCandidates) {
+        parentCorridor = this.getCorridor(
+          cx,
+          cy,
+          parent[0],
+          parent[1],
+        );
+
+        if (parentCorridor) break;
+      }
+
+      if (!parentCorridor) {
+        throw new Error(
+          'Unable to connect structural cell ' +
+            cx +
+            ',' +
+            cy +
+            ' toward origin',
+        );
+      }
+
+      corridors.push(parentCorridor);
+    }
 
     for (const neighbor of optionalNeighborEdges(this.seed, cx, cy)) {
-      corridors.push(this.getCorridor(cx, cy, neighbor[0], neighbor[1]));
+      const corridor = this.getCorridor(
+        cx,
+        cy,
+        neighbor[0],
+        neighbor[1],
+      );
+
+      if (corridor) corridors.push(corridor);
     }
 
     const geometry = {

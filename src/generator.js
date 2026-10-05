@@ -648,14 +648,14 @@ function roomForSite(seed, sx, sy) {
   );
 
   const sparse =
-    0.60 +
-    profile.density * 0.40;
+    0.78 +
+    profile.density * 0.22;
 
   const maxRadius =
     nearest *
     (
-      0.29 +
-      profile.density * 0.115
+      0.37 +
+      profile.density * 0.09
     );
 
   const major =
@@ -691,8 +691,8 @@ function roomForSite(seed, sx, sy) {
     maxRadius *
     (
       major
-        ? 0.92 + rng() * 0.08
-        : 0.67 + rng() * 0.30
+        ? 0.94 + rng() * 0.06
+        : 0.78 + rng() * 0.21
     ) *
     sparse;
 
@@ -1864,6 +1864,7 @@ export class InfiniteMapGenerator {
 
     const connectors = [];
     const endpointRecords = [];
+    const collisionRooms = [...siteRooms];
 
     for (const [key, edge] of edgeMap) {
       const roomA =
@@ -1919,13 +1920,14 @@ export class InfiniteMapGenerator {
           roomB,
           key,
           edge.primary,
-          siteRooms,
+          collisionRooms,
         );
 
       for (
         const transitionRoom
         of result.rooms
       ) {
+        collisionRooms.push(transitionRoom);
         if (
           !allRooms.has(
             transitionRoom.id,

@@ -2024,10 +2024,42 @@ function connectionRoomDetails(room, routeSeed, index) {
       }
     }
   }
+
+  if (
+    room.w > 82 &&
+    room.h > 70 &&
+    rng() < (room.major ? 0.18 : 0.07)
+  ) {
+    const corner = Math.floor(rng() * 4);
+    const cutW = room.w * (0.18 + rng() * 0.16);
+    const cutH = room.h * (0.18 + rng() * 0.16);
+    const touches =
+      corner === 0 ? [0, 1] :
+      corner === 1 ? [1, 2] :
+      corner === 2 ? [2, 3] : [3, 0];
+
+    room.cutouts.push({
+      side: touches[0],
+      touches,
+      x:
+        touches.includes(0)
+          ? room.w * 0.5 - cutW * 0.5
+          : -room.w * 0.5 + cutW * 0.5,
+      y:
+        touches.includes(1)
+          ? room.h * 0.5 - cutH * 0.5
+          : -room.h * 0.5 + cutH * 0.5,
+      w: cutW,
+      h: cutH,
+    });
+    room.detailStyle = 'connection-notch';
+  }
 }
 
 function buildConnectionFabric(points, width, color, routeSeed, obstacles) {
-  const spine = resamplePath(points, 92, routeSeed);
+  // A required connection is sampled densely enough that it reads as one
+  // continuously accreting complex rather than rooms placed along a road.
+  const spine = resamplePath(points, 78, routeSeed);
   const chambers = [];
   const fabricDoors = [];
 
@@ -2042,13 +2074,18 @@ function buildConnectionFabric(points, width, color, routeSeed, obstacles) {
     const angle = Math.atan2(next.y - prev.y, next.x - prev.x);
     const rng = seededRng(hashInt(routeSeed, i, spine.length, 1601));
 
-    const major = i % 4 === 0 || rng() < 0.18;
+    const major = i % 3 === 0 || rng() < 0.22;
+    const shapeRoll = rng();
     const along = major
-      ? 88 + rng() * 54
-      : 54 + rng() * 42;
+      ? 82 + rng() * 74
+      : shapeRoll < 0.28
+        ? 42 + rng() * 34
+        : 54 + rng() * 54;
     const cross = major
-      ? 64 + rng() * 58
-      : 42 + rng() * 42;
+      ? 62 + rng() * 72
+      : shapeRoll > 0.74
+        ? 72 + rng() * 46
+        : 40 + rng() * 50;
 
     let chamber = {
       id: 'fabric:' + routeSeed + ':' + i,
@@ -2110,8 +2147,9 @@ function buildConnectionFabric(points, width, color, routeSeed, obstacles) {
     // Side accretion makes the connection itself architectural. A hidden graph
     // edge becomes a chain of rooms and branches rather than a long empty road.
     const annexCount =
-      major ? 1 + (rng() < 0.42 ? 1 : 0) :
-      (rng() < 0.44 ? 1 : 0);
+      major
+        ? 1 + (rng() < 0.68 ? 1 : 0) + (rng() < 0.20 ? 1 : 0)
+        : (rng() < 0.62 ? 1 : 0) + (rng() < 0.16 ? 1 : 0);
 
     for (let a = 0; a < annexCount; a++) {
       const side = (rng() < 0.5 ? -1 : 1) * (a % 2 === 0 ? 1 : -1);
@@ -2161,7 +2199,7 @@ function buildConnectionFabric(points, width, color, routeSeed, obstacles) {
       // Some side rooms continue for one more generation. These short branch
       // chains fill lateral voids and stop the connection fabric from reading
       // as a simple necklace along one center line.
-      if (rng() < (major ? 0.48 : 0.24)) {
+      if (rng() < (major ? 0.62 : 0.34)) {
         const branchW = 34 + rng() * 54;
         const branchH = 30 + rng() * 50;
         const branchTurn = rng() < 0.34;

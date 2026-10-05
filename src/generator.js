@@ -1890,10 +1890,11 @@ function buildConnectionFabric(points, width, color, routeSeed, obstacles) {
         const branchW = 34 + rng() * 54;
         const branchH = 30 + rng() * 50;
         const branchTurn = rng() < 0.34;
+        const branchTurnSign = rng() < 0.5 ? -1 : 1;
         const branchNormal = branchTurn
           ? {
-              x: tangent.x * (rng() < 0.5 ? -1 : 1),
-              y: tangent.y * (rng() < 0.5 ? -1 : 1),
+              x: tangent.x * branchTurnSign,
+              y: tangent.y * branchTurnSign,
             }
           : normal;
         const branchTangent = {

@@ -4313,8 +4313,19 @@ export class InfiniteMapGenerator {
     this.primitiveCache.clear();
   }
 
-  getMacroPrimitives(mx, my) {
-    const key = primitiveKey(mx, my);
+  getSitePrimitives(sx, sy) {
+    if (
+      !isAcceptedSite(
+        this.seed,
+        sx,
+        sy,
+      )
+    ) {
+      return [];
+    }
+
+    const key =
+      primitiveKey(sx, sy);
 
     const cached =
       this.primitiveCache.get(key);
@@ -4325,10 +4336,10 @@ export class InfiniteMapGenerator {
     }
 
     const primitives =
-      macroPrimitives(
+      siteGrowth(
         this.seed,
-        mx,
-        my,
+        sx,
+        sy,
       );
 
     this.primitiveCache.set(
@@ -4343,43 +4354,137 @@ export class InfiniteMapGenerator {
   }
 
   collectPrimitives(bounds) {
-    const minMX =
+    const supportHalo = 560;
+
+    const minSX =
       Math.floor(
         (
           bounds.minX -
           PRIMITIVE_HALO
         ) /
-          MACRO_SIZE,
+          SITE_GRID,
       ) - 1;
 
-    const maxMX =
+    const maxSX =
       Math.floor(
         (
           bounds.maxX +
           PRIMITIVE_HALO
         ) /
-          MACRO_SIZE,
+          SITE_GRID,
       ) + 1;
 
-    const minMY =
+    const minSY =
       Math.floor(
         (
           bounds.minY -
           PRIMITIVE_HALO
         ) /
-          MACRO_SIZE,
+          SITE_GRID,
       ) - 1;
 
-    const maxMY =
+    const maxSY =
       Math.floor(
         (
           bounds.maxY +
           PRIMITIVE_HALO
         ) /
-          MACRO_SIZE,
+          SITE_GRID,
       ) + 1;
 
-    const expanded = {
+    const supportBounds = {
+      minX:
+        bounds.minX - supportHalo,
+      maxX:
+        bounds.maxX + supportHalo,
+      minY:
+        bounds.minY - supportHalo,
+      maxY:
+        bounds.maxY + supportHalo,
+    };
+
+    const base = [];
+
+    for (
+      let sy = minSY;
+      sy <= maxSY;
+      sy++
+    ) {
+      for (
+        let sx = minSX;
+        sx <= maxSX;
+        sx++
+      ) {
+        if (
+          !isAcceptedSite(
+            this.seed,
+            sx,
+            sy,
+          )
+        ) {
+          continue;
+        }
+
+        const primitives =
+          this.getSitePrimitives(
+            sx,
+            sy,
+          );
+
+        for (
+          const primitive of primitives
+        ) {
+          if (
+            aabbIntersects(
+              primitive.aabb,
+              supportBounds,
+            )
+          ) {
+            base.push(primitive);
+          }
+        }
+      }
+    }
+
+    const merged =
+      mergePrimitives(
+        this.seed,
+        base,
+        {
+          minX:
+            bounds.minX - 300,
+          maxX:
+            bounds.maxX + 300,
+          minY:
+            bounds.minY - 300,
+          maxY:
+            bounds.maxY + 300,
+        },
+      );
+
+    const withMerges =
+      base.concat(merged);
+
+    const infill =
+      infillPrimitives(
+        this.seed,
+        withMerges,
+        {
+          minX:
+            bounds.minX - 300,
+          maxX:
+            bounds.maxX + 300,
+          minY:
+            bounds.minY - 300,
+          maxY:
+            bounds.maxY + 300,
+        },
+      );
+
+    const all =
+      withMerges.concat(infill);
+
+    const visibleBounds = {
       minX:
         bounds.minX - FABRIC_CELL,
       maxX:
@@ -4390,40 +4495,13 @@ export class InfiniteMapGenerator {
         bounds.maxY + FABRIC_CELL,
     };
 
-    const out = [];
-
-    for (
-      let my = minMY;
-      my <= maxMY;
-      my++
-    ) {
-      for (
-        let mx = minMX;
-        mx <= maxMX;
-        mx++
-      ) {
-        const primitives =
-          this.getMacroPrimitives(
-            mx,
-            my,
-          );
-
-        for (
-          const primitive of primitives
-        ) {
-          if (
-            aabbIntersects(
-              primitive.aabb,
-              expanded,
-            )
-          ) {
-            out.push(primitive);
-          }
-        }
-      }
-    }
-
-    return out;
+    return all.filter(
+      (primitive) =>
+        aabbIntersects(
+          primitive.aabb,
+          visibleBounds,
+        ),
+    );
   }
 
   getChunk(cx, cy) {

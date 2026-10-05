@@ -1125,11 +1125,15 @@ function buildBlockedGrid(obstacles, minX, maxX, minY, maxY) {
   const blocked = new Set();
 
   for (const obstacle of obstacles) {
-    const minGX = Math.max(minX, Math.floor((obstacle.x - obstacle.r) / ROUTE_STEP));
-    const maxGX = Math.min(maxX, Math.ceil((obstacle.x + obstacle.r) / ROUTE_STEP));
-    const minGY = Math.max(minY, Math.floor((obstacle.y - obstacle.r) / ROUTE_STEP));
-    const maxGY = Math.min(maxY, Math.ceil((obstacle.y + obstacle.r) / ROUTE_STEP));
-    const r2 = obstacle.r * obstacle.r;
+    // Inflate raster obstacles by half a grid diagonal. This guarantees that
+    // a legal edge between two unblocked grid nodes cannot slice through a
+    // room circle between those nodes.
+    const rasterRadius = obstacle.r + ROUTE_STEP * 0.72;
+    const minGX = Math.max(minX, Math.floor((obstacle.x - rasterRadius) / ROUTE_STEP));
+    const maxGX = Math.min(maxX, Math.ceil((obstacle.x + rasterRadius) / ROUTE_STEP));
+    const minGY = Math.max(minY, Math.floor((obstacle.y - rasterRadius) / ROUTE_STEP));
+    const maxGY = Math.min(maxY, Math.ceil((obstacle.y + rasterRadius) / ROUTE_STEP));
+    const r2 = rasterRadius * rasterRadius;
 
     for (let gy = minGY; gy <= maxGY; gy++) {
       const wy = gy * ROUTE_STEP;

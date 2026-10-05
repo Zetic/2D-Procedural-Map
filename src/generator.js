@@ -124,6 +124,72 @@ function parentFor(seed, cx, cy) {
   return [cx, cy - sign(cy)];
 }
 
+function parentConnectionCandidates(seed, cx, cy) {
+  if (cx === 0 && cy === 0) return [];
+
+  const preferred = parentFor(seed, cx, cy);
+  const currentRank = distanceRank(cx, cy);
+  const candidates = [];
+  const seen = new Set();
+
+  function add(x, y, preferredRank = false) {
+    if (x === cx && y === cy) return;
+    if (distanceRank(x, y) >= currentRank) return;
+
+    const key = keyOf(x, y);
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    const dx = x - cx;
+    const dy = y - cy;
+    const span = Math.hypot(dx, dy);
+
+    candidates.push({
+      x,
+      y,
+      preferred: preferredRank,
+      score:
+        span +
+        hash01(
+          seed,
+          cx * 131 + x,
+          cy * 137 + y,
+          24,
+        ) *
+          0.22,
+    });
+  }
+
+  if (preferred) add(preferred[0], preferred[1], true);
+
+  // Nearby lower-rank alternatives are deterministic escape hatches when a
+  // dense architectural pocket makes the ideal hidden parent edge impossible.
+  // Every fallback still decreases rank, so global connectivity remains
+  // acyclic and always progresses toward the origin.
+  for (let radius = 1; radius <= 3; radius++) {
+    for (let oy = -radius; oy <= radius; oy++) {
+      for (let ox = -radius; ox <= radius; ox++) {
+        if (
+          Math.max(Math.abs(ox), Math.abs(oy)) !== radius
+        ) {
+          continue;
+        }
+
+        add(cx + ox, cy + oy, false);
+      }
+    }
+  }
+
+  candidates.sort((a, b) => {
+    if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+    if (a.score !== b.score) return a.score - b.score;
+    if (a.x !== b.x) return a.x - b.x;
+    return a.y - b.y;
+  });
+
+  return candidates.map((candidate) => [candidate.x, candidate.y]);
+}
+
 function isTreeEdge(seed, ax, ay, bx, by) {
   const aParent = parentFor(seed, ax, ay);
   const bParent = parentFor(seed, bx, by);
@@ -2221,7 +2287,11 @@ export class InfiniteMapGenerator {
     }
 
     if (!chosen) {
-      throw new Error('Unable to route architectural growth for ' + edgeKey);
+      this.edgeCache.set(edgeKey, {
+        corridor: null,
+        used: this.frame,
+      });
+      return null;
     }
 
     const sourcePortal = chosen.sourceExit.portal;
@@ -2283,11 +2353,48 @@ export class InfiniteMapGenerator {
     const complex = this.getComplex(cx, cy);
     const corridors = [];
 
-    const parent = parentFor(this.seed, cx, cy);
-    if (parent) corridors.push(this.getCorridor(cx, cy, parent[0], parent[1]));
+    const parentCandidates = parentConnectionCandidates(
+      this.seed,
+      cx,
+      cy,
+    );
+
+    if (parentCandidates.length) {
+      let parentCorridor = null;
+
+      for (const parent of parentCandidates) {
+        parentCorridor = this.getCorridor(
+          cx,
+          cy,
+          parent[0],
+          parent[1],
+        );
+
+        if (parentCorridor) break;
+      }
+
+      if (!parentCorridor) {
+        throw new Error(
+          'Unable to connect structural cell ' +
+            cx +
+            ',' +
+            cy +
+            ' toward origin',
+        );
+      }
+
+      corridors.push(parentCorridor);
+    }
 
     for (const neighbor of optionalNeighborEdges(this.seed, cx, cy)) {
-      corridors.push(this.getCorridor(cx, cy, neighbor[0], neighbor[1]));
+      const corridor = this.getCorridor(
+        cx,
+        cy,
+        neighbor[0],
+        neighbor[1],
+      );
+
+      if (corridor) corridors.push(corridor);
     }
 
     const geometry = {

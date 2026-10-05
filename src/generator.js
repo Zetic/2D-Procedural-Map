@@ -1712,6 +1712,33 @@ function corridorDoor(portal) {
   };
 }
 
+function findSafeRoute(start, goal, obstacles, routeSeed) {
+  const gridRoute = routeAStar(start, goal, obstacles, routeSeed);
+
+  if (gridRoute) {
+    const candidate = [start];
+
+    for (const point of gridRoute) {
+      const last = candidate[candidate.length - 1];
+      if (Math.hypot(point.x - last.x, point.y - last.y) > 1) {
+        candidate.push(point);
+      }
+    }
+
+    const last = candidate[candidate.length - 1];
+    if (Math.hypot(goal.x - last.x, goal.y - last.y) > 1) {
+      candidate.push(goal);
+    }
+
+    if (pathClear(candidate, obstacles)) return candidate;
+  }
+
+  const dogleg = fallbackRoute(start, goal, obstacles, routeSeed);
+  if (dogleg) return dogleg;
+
+  return detourAroundObstacles(start, goal, obstacles, routeSeed);
+}
+
 export class InfiniteMapGenerator {
   constructor(seedText = 'backrooms-71') {
     this.complexCache = new Map();

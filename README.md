@@ -2,7 +2,7 @@
 
 A deterministic, exploration-order-independent infinite 2D architectural map for the browser.
 
-Generator version 3 is a structural rewrite aimed at the dense, irregular, connected floor-plan style in the reference map.
+Generator version 4 increases density and room-shape variation while keeping the single-floor, no-overlap guarantees introduced in v3.
 
 ## Generation model
 
@@ -12,25 +12,24 @@ The world uses three separate layers:
 2. **Architectural room growth** — each district grows a collision-free complex of adjacent rooms from explicit wall frontiers.
 3. **Routed inter-district halls** — connections leave rooms only through generated exterior portals and route around neighboring complexes.
 
-Streaming cells are only a deterministic indexing mechanism. They do not define visible room edges, doors, or corridor boundaries.
+Streaming cells are only deterministic indexing/cache units. They do not define visible room edges, doors, or corridor boundaries.
 
-## Architectural growth
+## Generator v4: density and room variety
 
-Each district starts from a large anchor room, then expands through deterministic wall frontiers.
+Districts now use deterministic architectural profiles instead of one universal room distribution:
 
-Generated room types include:
+- service mazes with many small cells and utility halls
+- gallery districts with long narrow rooms and transverse halls
+- atrium districts with large open chambers and wings
+- office webs with small offices, suites, and dense corridor-like rooms
+- warehouse districts with larger column-filled spaces and loading halls
+- mixed districts combining several room families
 
-- broad chambers
-- narrow halls
-- long rooms
-- short connector rooms
-- small chambers
-- large partitioned rooms
-- rooms containing deterministic column layouts
+Room growth also retries blocked wall frontiers with progressively smaller and differently offset candidates before giving up. This packs usable space substantially more densely without permitting overlap.
 
-A new room is accepted only when its oriented footprint is free. It is placed directly against an existing room wall and an explicit doorway is recorded at that shared boundary.
+Large rooms can contain partitions, column fields, interior courtyards, or exterior-facing cutouts. Exterior cutouts remove part of the room silhouette, producing deterministic L/U-like spaces instead of only rectangles.
 
-This creates compound, irregular floor-plan silhouettes instead of independent rectangles scattered around a hub.
+Adjacent rooms sometimes use wide openings rather than narrow doors. This merges several rectangles into visually larger compound spaces and creates more irregular silhouettes closer to the reference map.
 
 ## No 2D overpasses
 
@@ -39,7 +38,8 @@ The generator assumes one floor and no elevation.
 - Room interiors never overlap.
 - A corridor cannot route through a room complex.
 - Corridor entry into a complex is allowed only through a selected exterior wall portal.
-- The short portal-to-route neck is checked against every other room in that complex.
+- Notched room sides are excluded from portal placement.
+- Portal necks are checked against every other room in the complex.
 - Routed corridors use deterministic obstacle-aware A* navigation around complete room complexes.
 - Corridor crossings are same-floor junctions rather than overpasses.
 - Wider turn chambers are added only when their footprint remains clear of room complexes.
@@ -52,9 +52,9 @@ Every structural choice comes from:
 
 There is no exploration-driven global random-number stream.
 
-The same seed therefore produces the same room complexes, doors, routes, junctions, and layout regardless of which direction is explored first.
+The same seed therefore produces the same room complexes, doors, routes, junctions, cutouts, and layout regardless of exploration order.
 
-Generator version 3 is part of the hash namespace, so older algorithm versions do not silently produce different geometry under the same deterministic contract.
+Generator version 4 is part of the hash namespace, so algorithm revisions do not silently change an existing deterministic world contract.
 
 ## Controls
 

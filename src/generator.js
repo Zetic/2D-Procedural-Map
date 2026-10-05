@@ -1,8 +1,8 @@
 export const GENERATOR_VERSION = 9;
 
 export const FABRIC_CELL = 15;
-export const FABRIC_CHUNK = 720;
-export const MACRO_SIZE = 420;
+export const FABRIC_CHUNK = 900;
+export const MACRO_SIZE = 560;
 export const QUERY_HALO = FABRIC_CELL * 2;
 
 const TAU = Math.PI * 2;
@@ -14,9 +14,9 @@ const FLOOR_PALETTES = [
 ];
 
 const RASTER_N = FABRIC_CHUNK / FABRIC_CELL;
-const PRIMITIVE_HALO = 1650;
+const PRIMITIVE_HALO = 2100;
 const SITE_GRID = MACRO_SIZE;
-const SITE_MIN_DISTANCE = 380;
+const SITE_MIN_DISTANCE = 495;
 const SITE_NEIGHBOR_RADIUS = 2;
 const SITE_PARENT_RADIUS = 5;
 const MERGE_RADIUS = 265;
@@ -1140,6 +1140,7 @@ function growFreeBranch(
   let y = start.y;
   let heading = startAngle;
   let previousAlong = 92;
+  let previousMin = 72;
   let sinceMajor = 0;
 
   const profileAtStart =
@@ -1216,7 +1217,17 @@ function growFreeBranch(
         ? dims.h
         : dims.w;
 
-    const advance =
+    const currentMin =
+      Math.min(
+        dims.w,
+        dims.h,
+      );
+
+    const overlapLimit =
+      (previousMin + currentMin) *
+      0.44;
+
+    const nominalAdvance =
       Math.max(
         34,
         Math.min(
@@ -1225,6 +1236,20 @@ function growFreeBranch(
           104,
         ),
       );
+
+    const advance =
+      step === 0
+        ? Math.min(
+            30,
+            currentMin * 0.24,
+          )
+        : Math.max(
+            24,
+            Math.min(
+              nominalAdvance,
+              overlapLimit,
+            ),
+          );
 
     x +=
       Math.cos(heading) *
@@ -1323,6 +1348,7 @@ function growFreeBranch(
         : sinceMajor + 1;
 
     previousAlong = along;
+    previousMin = currentMin;
 
     if (
       depth < 1 &&
@@ -1476,6 +1502,11 @@ function growFrontToTarget(
   let y = source.y;
   let previousAlong =
     initialDims.w;
+  let previousMin =
+    Math.min(
+      initialDims.w,
+      initialDims.h,
+    );
   let sinceMajor = 0;
 
   const startDistance =
@@ -1487,10 +1518,10 @@ function growFrontToTarget(
   const maxSteps =
     clamp(
       Math.ceil(
-        startDistance / 64,
-      ) + 7,
-      8,
-      28,
+        startDistance / 48,
+      ) + 9,
+      10,
+      38,
     );
 
   const groupSpan =
@@ -1604,21 +1635,32 @@ function growFrontToTarget(
         ? dims.h
         : dims.w;
 
+    const currentMin =
+      Math.min(
+        dims.w,
+        dims.h,
+      );
+
+    const overlapLimit =
+      (previousMin + currentMin) *
+      0.44;
+
     const nominalAdvance =
       Math.max(
-        38,
+        36,
         Math.min(
           previousAlong * 0.34 +
             along * 0.29,
-          108,
+          104,
         ),
       );
 
     const advance =
       Math.min(
         nominalAdvance,
+        overlapLimit,
         Math.max(
-          34,
+          30,
           distance * 0.62,
         ),
       );
@@ -1718,8 +1760,8 @@ function growFrontToTarget(
           ? 0.25
           : 0.18
       ) +
-      profile.branch * 0.22 +
-      profile.density * 0.10;
+      profile.branch * 0.17 +
+      profile.density * 0.07;
 
     if (
       step > 1 &&
@@ -1767,6 +1809,7 @@ function growFrontToTarget(
         : sinceMajor + 1;
 
     previousAlong = along;
+    previousMin = currentMin;
   }
 
   let remaining =
@@ -1810,11 +1853,19 @@ function growFrontToTarget(
           : 'room',
       );
 
+    const currentMin =
+      Math.min(
+        dims.w,
+        dims.h,
+      );
+
     const advance =
       Math.min(
-        92,
+        88,
+        (previousMin + currentMin) *
+          0.44,
         Math.max(
-          38,
+          30,
           remaining * 0.58,
         ),
       );
@@ -1877,6 +1928,13 @@ function growFrontToTarget(
       rng,
       profile,
     );
+
+    previousMin = currentMin;
+    previousAlong =
+      Math.max(
+        dims.w,
+        dims.h,
+      );
 
     remaining =
       Math.hypot(

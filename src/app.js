@@ -263,6 +263,7 @@ function collectCorridors(cells) {
     }
   }
 
+  corridors.sort((a, b) => a.edgeKey.localeCompare(b.edgeKey));
   return corridors;
 }
 

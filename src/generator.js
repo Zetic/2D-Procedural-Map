@@ -2320,6 +2320,8 @@ export class InfiniteMapGenerator {
   }
 
   getComplex(cx, cy) {
+    if (!isAcceptedSite(this.seed, cx, cy)) return null;
+
     const key = keyOf(cx, cy);
     const cached = this.complexCache.get(key);
     if (cached) {
@@ -2342,11 +2344,10 @@ export class InfiniteMapGenerator {
     for (let cy = minY; cy <= maxY; cy++) {
       for (let cx = minX; cx <= maxX; cx++) {
         const complex = this.getComplex(cx, cy);
+        if (!complex) continue;
 
-        // Routing now sees actual room-scale occupied space rather than one
-        // oversized circle around the entire district. This allows growth to
-        // thread through architectural gaps instead of drawing highways around
-        // isolated blobs.
+        // Routing sees actual room-scale occupied space from the irregular
+        // growth field, never a regular structural-cell exclusion zone.
         for (const room of complex.rooms) {
           obstacles.push({
             x: room.x,
@@ -2517,6 +2518,8 @@ export class InfiniteMapGenerator {
   }
 
   getCell(cx, cy) {
+    if (!isAcceptedSite(this.seed, cx, cy)) return null;
+
     const key = keyOf(cx, cy);
     const cached = this.cellCache.get(key);
     if (cached) {
@@ -2525,6 +2528,8 @@ export class InfiniteMapGenerator {
     }
 
     const complex = this.getComplex(cx, cy);
+    if (!complex) return null;
+
     const corridors = [];
 
     const parentCandidates = parentConnectionCandidates(
@@ -2549,11 +2554,11 @@ export class InfiniteMapGenerator {
 
       if (!parentCorridor) {
         throw new Error(
-          'Unable to connect structural cell ' +
+          'Unable to connect growth site ' +
             cx +
             ',' +
             cy +
-            ' toward origin',
+            ' toward root',
         );
       }
 
@@ -2574,11 +2579,13 @@ export class InfiniteMapGenerator {
     const geometry = {
       cx,
       cy,
+      siteId: siteKey(cx, cy),
       color: complex.color,
       rooms: complex.rooms,
       doors: complex.doors,
       corridors,
       anchor: complex.anchor,
+      parent: parentFor(this.seed, cx, cy),
     };
 
     this.cellCache.set(key, { geometry, used: this.frame });
@@ -2587,22 +2594,32 @@ export class InfiniteMapGenerator {
 
   query(bounds) {
     this.frame++;
+
+    // CELL_SIZE now controls only the query/cache halo. Architectural sources
+    // come from the independent blue-noise site field.
     const haloWorld = CELL_SIZE * QUERY_HALO;
-    const minX = Math.floor((bounds.minX - haloWorld) / CELL_SIZE);
-    const maxX = Math.floor((bounds.maxX + haloWorld) / CELL_SIZE);
-    const minY = Math.floor((bounds.minY - haloWorld) / CELL_SIZE);
-    const maxY = Math.floor((bounds.maxY + haloWorld) / CELL_SIZE);
+    const minX = Math.floor((bounds.minX - haloWorld) / SITE_GRID) - 1;
+    const maxX = Math.floor((bounds.maxX + haloWorld) / SITE_GRID) + 1;
+    const minY = Math.floor((bounds.minY - haloWorld) / SITE_GRID) - 1;
+    const maxY = Math.floor((bounds.maxY + haloWorld) / SITE_GRID) + 1;
     const cells = [];
 
     for (let cy = minY; cy <= maxY; cy++) {
       for (let cx = minX; cx <= maxX; cx++) {
-        cells.push(this.getCell(cx, cy));
+        if (!isAcceptedSite(this.seed, cx, cy)) continue;
+        const geometry = this.getCell(cx, cy);
+        if (geometry) cells.push(geometry);
       }
     }
 
-    if (this.complexCache.size > 760) this.pruneCache(this.complexCache, 560);
-    if (this.edgeCache.size > 960) this.pruneCache(this.edgeCache, 700);
-    if (this.cellCache.size > 560) this.pruneCache(this.cellCache, 380);
+    cells.sort((a, b) => {
+      if (a.cx !== b.cx) return a.cx - b.cx;
+      return a.cy - b.cy;
+    });
+
+    if (this.complexCache.size > 620) this.pruneCache(this.complexCache, 440);
+    if (this.edgeCache.size > 900) this.pruneCache(this.edgeCache, 640);
+    if (this.cellCache.size > 520) this.pruneCache(this.cellCache, 360);
     return cells;
   }
 
@@ -2617,4 +2634,14 @@ export class InfiniteMapGenerator {
 export function parentCell(seedText, cx, cy) {
   const seed = hashString('v' + GENERATOR_VERSION + ':' + String(seedText));
   return parentFor(seed, cx, cy);
+}
+
+export function isSiteCell(seedText, cx, cy) {
+  const seed = hashString('v' + GENERATOR_VERSION + ':' + String(seedText));
+  return isAcceptedSite(seed, cx, cy);
+}
+
+export function sitePosition(seedText, cx, cy) {
+  const seed = hashString('v' + GENERATOR_VERSION + ':' + String(seedText));
+  return anchorFor(seed, cx, cy);
 }

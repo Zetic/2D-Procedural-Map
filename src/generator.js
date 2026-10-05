@@ -1302,39 +1302,181 @@ function chamberClear(chamber, obstacles, corridorWidth) {
   return true;
 }
 
-function buildChambers(points, width, color, routeSeed, obstacles) {
-  const chambers = [];
+function resamplePath(points, maxStep, routeSeed) {
+  if (!points.length) return [];
+  const output = [{ ...points[0] }];
 
-  for (let i = 1; i < points.length - 1; i++) {
-    const prev = points[i - 1];
-    const point = points[i];
-    const next = points[i + 1];
-    const ax = point.x - prev.x;
-    const ay = point.y - prev.y;
-    const bx = next.x - point.x;
-    const by = next.y - point.y;
-    const lenA = Math.hypot(ax, ay) || 1;
-    const lenB = Math.hypot(bx, by) || 1;
-    const turn = Math.abs((ax / lenA) * (by / lenB) - (ay / lenA) * (bx / lenB));
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len <= 1e-6) continue;
 
-    if (turn > 0.12 || hash01(routeSeed, i, points.length, 922) < 0.20) {
-      const size = width * (1.55 + hash01(routeSeed, i, points.length, 923) * 1.45);
-      const chamber = {
-        x: point.x,
-        y: point.y,
-        w: size * (0.90 + hash01(routeSeed, i, points.length, 924) * 0.50),
-        h: size * (0.78 + hash01(routeSeed, i, points.length, 925) * 0.56),
-        angle: Math.atan2(by, bx),
-        color,
-        major: false,
-        partitions: [],
-        columns: [],
-      };
-      if (chamberClear(chamber, obstacles, width)) chambers.push(chamber);
+    const localStep = Math.max(
+      58,
+      maxStep * (0.84 + hash01(routeSeed, i, points.length, 1401) * 0.24),
+    );
+    const pieces = Math.max(1, Math.ceil(len / localStep));
+
+    for (let j = 1; j <= pieces; j++) {
+      const t = j / pieces;
+      output.push({
+        x: a.x + dx * t,
+        y: a.y + dy * t,
+      });
     }
   }
 
-  return chambers;
+  return output;
+}
+
+function fabricRoomClear(room, obstacles, accepted, corridorWidth, ignoreIndex = -1) {
+  if (!chamberClear(room, obstacles, corridorWidth)) return false;
+
+  for (let i = 0; i < accepted.length; i++) {
+    if (i === ignoreIndex) continue;
+    if (roomsOverlap(room, accepted[i], 2)) return false;
+  }
+
+  return true;
+}
+
+function connectionRoomDetails(room, routeSeed, index) {
+  room.partitions = [];
+  room.columns = [];
+  room.cutouts = [];
+  room.blockedSides = [];
+  room.detailStyle = 'connection';
+
+  const rng = seededRng(hashInt(routeSeed, index, Math.round(room.w + room.h), 1501));
+
+  if (room.major || rng() < 0.38) {
+    const count = room.major ? 1 + Math.floor(rng() * 2) : 1;
+    for (let i = 0; i < count; i++) {
+      room.partitions.push({
+        axis: rng() < 0.5 ? 'x' : 'y',
+        t: 0.24 + rng() * 0.52,
+        gap: 0.22 + rng() * 0.20,
+      });
+    }
+  }
+
+  if (room.major && rng() < 0.36) {
+    const cols = Math.max(1, Math.min(3, Math.floor(room.w / 62)));
+    const rows = Math.max(1, Math.min(3, Math.floor(room.h / 62)));
+    for (let y = 1; y <= rows; y++) {
+      for (let x = 1; x <= cols; x++) {
+        if (rng() < 0.70) {
+          room.columns.push({
+            u: x / (cols + 1),
+            v: y / (rows + 1),
+            r: 2.5 + rng() * 2.5,
+          });
+        }
+      }
+    }
+  }
+}
+
+function buildConnectionFabric(points, width, color, routeSeed, obstacles) {
+  const spine = resamplePath(points, 92, routeSeed);
+  const chambers = [];
+  const fabricDoors = [];
+
+  if (spine.length < 3) {
+    return { spine, chambers, fabricDoors };
+  }
+
+  for (let i = 1; i < spine.length - 1; i++) {
+    const prev = spine[i - 1];
+    const point = spine[i];
+    const next = spine[i + 1];
+    const angle = Math.atan2(next.y - prev.y, next.x - prev.x);
+    const rng = seededRng(hashInt(routeSeed, i, spine.length, 1601));
+
+    const major = i % 4 === 0 || rng() < 0.18;
+    const along = major
+      ? 88 + rng() * 54
+      : 54 + rng() * 42;
+    const cross = major
+      ? 64 + rng() * 58
+      : 42 + rng() * 42;
+
+    const chamber = {
+      id: 'fabric:' + routeSeed + ':' + i,
+      x: point.x,
+      y: point.y,
+      w: along,
+      h: cross,
+      angle,
+      color,
+      major,
+      kind: major ? 'waystation' : (rng() < 0.45 ? 'connector-room' : 'hall-room'),
+    };
+
+    connectionRoomDetails(chamber, routeSeed, i);
+
+    if (!fabricRoomClear(chamber, obstacles, chambers, width)) continue;
+
+    const chamberIndex = chambers.length;
+    chambers.push(chamber);
+
+    // Side accretion makes the connection itself architectural. A hidden graph
+    // edge becomes a chain of rooms and branches rather than a long empty road.
+    const annexCount =
+      major ? 1 + (rng() < 0.42 ? 1 : 0) :
+      (rng() < 0.44 ? 1 : 0);
+
+    for (let a = 0; a < annexCount; a++) {
+      const side = (rng() < 0.5 ? -1 : 1) * (a % 2 === 0 ? 1 : -1);
+      const normal = {
+        x: -Math.sin(angle) * side,
+        y: Math.cos(angle) * side,
+      };
+      const tangent = {
+        x: Math.cos(angle),
+        y: Math.sin(angle),
+      };
+
+      const annexW = 38 + rng() * (major ? 62 : 42);
+      const annexH = 34 + rng() * (major ? 58 : 38);
+      const tangentOffset = (rng() - 0.5) * Math.max(0, chamber.w - annexW) * 0.42;
+      const distance = chamber.h * 0.5 + annexH * 0.5;
+
+      const annex = {
+        id: chamber.id + ':annex:' + a,
+        x: chamber.x + normal.x * distance + tangent.x * tangentOffset,
+        y: chamber.y + normal.y * distance + tangent.y * tangentOffset,
+        w: annexW,
+        h: annexH,
+        angle,
+        color,
+        major: false,
+        kind: rng() < 0.5 ? 'annex' : 'side-room',
+      };
+
+      connectionRoomDetails(annex, routeSeed ^ 0x2f3a1, i * 5 + a);
+
+      if (!fabricRoomClear(annex, obstacles, chambers, width, chamberIndex)) continue;
+
+      chambers.push(annex);
+      const wallX = chamber.x + normal.x * chamber.h * 0.5 + tangent.x * tangentOffset;
+      const wallY = chamber.y + normal.y * chamber.h * 0.5 + tangent.y * tangentOffset;
+
+      fabricDoors.push({
+        x: wallX,
+        y: wallY,
+        angle,
+        width: Math.max(14, Math.min(34, annexW * 0.52)),
+        color,
+        kind: rng() < 0.38 ? 'opening' : 'internal',
+      });
+    }
+  }
+
+  return { spine, chambers, fabricDoors };
 }
 
 function corridorDoor(portal) {

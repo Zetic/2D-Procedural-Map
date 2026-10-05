@@ -3,7 +3,7 @@ export const QUERY_HALO = 2;
 export const GENERATOR_VERSION = 4;
 
 const TAU = Math.PI * 2;
-const MAX_COMPLEX_RADIUS = 292;
+const MAX_COMPLEX_RADIUS = 304;
 const ROUTE_STEP = 42;
 const WALL = '#665947';
 const FLOOR_PALETTES = [
@@ -642,43 +642,75 @@ function createComplex(seed, cx, cy) {
     if (parent.blockedSides.includes(front.side)) continue;
 
     const parentSide = sideInfo(parent, front.side);
-    const dims = roomDimensions(rng, front.side, front.depth, profile);
-    const child = {
-      id: cx + ':' + cy + ':' + rooms.length,
-      x: 0,
-      y: 0,
-      w: dims.w,
-      h: dims.h,
-      angle,
-      color,
-      major: dims.major,
-      kind: dims.kind,
-    };
-
     const incomingSide = oppositeSide(front.side);
-    const childNormalHalf = (front.side === 0 || front.side === 2) ? child.w * 0.5 : child.h * 0.5;
-    const childCrossHalf = (front.side === 0 || front.side === 2) ? child.h * 0.5 : child.w * 0.5;
-    const overlapLimit = Math.min(parentSide.halfTangent, childCrossHalf);
-    const offsetLimit = Math.max(0, overlapLimit * 0.62 - 8);
-    const lateral =
-      hashSigned(
+
+    let child = null;
+    let childCrossHalf = 0;
+    let lateral = 0;
+
+    // Dense architectural packing requires more than one proposal per wall.
+    // If a large room cannot fit, progressively smaller/shifted candidates are
+    // tried before the frontier is abandoned.
+    for (let placementTry = 0; placementTry < 5; placementTry++) {
+      const dims = roomDimensions(rng, front.side, front.depth, profile);
+      const shrink = 1 - placementTry * 0.085;
+      const candidate = {
+        id: cx + ':' + cy + ':' + rooms.length,
+        x: 0,
+        y: 0,
+        w: Math.max(24, dims.w * shrink),
+        h: Math.max(22, dims.h * shrink),
+        angle,
+        color,
+        major: dims.major && placementTry < 3,
+        kind: dims.kind,
+      };
+
+      const childNormalHalf =
+        (front.side === 0 || front.side === 2)
+          ? candidate.w * 0.5
+          : candidate.h * 0.5;
+      const candidateCrossHalf =
+        (front.side === 0 || front.side === 2)
+          ? candidate.h * 0.5
+          : candidate.w * 0.5;
+      const overlapLimit = Math.min(parentSide.halfTangent, candidateCrossHalf);
+      const offsetLimit = Math.max(0, overlapLimit * 0.72 - 7);
+
+      const signedOffset = hashSigned(
         seed,
-        cx * 997 + rooms.length,
+        cx * 997 + rooms.length + placementTry * 37,
         cy * 991 + front.roomIndex,
-        front.side + 410,
-      ) * offsetLimit;
+        front.side + 410 + placementTry * 19,
+      );
 
-    child.x =
-      parentSide.x +
-      parentSide.normal.x * childNormalHalf +
-      parentSide.tangent.x * lateral;
-    child.y =
-      parentSide.y +
-      parentSide.normal.y * childNormalHalf +
-      parentSide.tangent.y * lateral;
+      const offsetScale =
+        placementTry === 0 ? 0.86 :
+        placementTry === 1 ? 0.46 :
+        placementTry === 2 ? 0 :
+        placementTry === 3 ? 0.68 : 0.28;
 
-    if (!withinComplexRadius(child, anchor)) continue;
-    if (collidesWithRooms(child, rooms, front.roomIndex)) continue;
+      const candidateLateral = signedOffset * offsetLimit * offsetScale;
+
+      candidate.x =
+        parentSide.x +
+        parentSide.normal.x * childNormalHalf +
+        parentSide.tangent.x * candidateLateral;
+      candidate.y =
+        parentSide.y +
+        parentSide.normal.y * childNormalHalf +
+        parentSide.tangent.y * candidateLateral;
+
+      if (!withinComplexRadius(candidate, anchor)) continue;
+      if (collidesWithRooms(candidate, rooms, front.roomIndex)) continue;
+
+      child = candidate;
+      childCrossHalf = candidateCrossHalf;
+      lateral = candidateLateral;
+      break;
+    }
+
+    if (!child) continue;
 
     addRoomDetails(child, rng, profile, [incomingSide]);
 

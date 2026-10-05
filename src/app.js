@@ -89,7 +89,10 @@ function drawExteriorWalls(chunks) {
   }
 
   ctx.strokeStyle = wall;
-  ctx.lineWidth = 3.5;
+  ctx.lineWidth = Math.max(
+    3.5,
+    0.78 / Math.max(camera.zoom, 0.08),
+  );
   ctx.lineCap = 'square';
   ctx.lineJoin = 'miter';
   ctx.stroke();
@@ -108,7 +111,10 @@ function drawInteriorWalls(chunks, detailLevel) {
   }
 
   ctx.strokeStyle = interiorWall;
-  ctx.lineWidth = detailLevel >= 2 ? 1.85 : 1.35;
+  ctx.lineWidth = Math.max(
+    detailLevel >= 2 ? 1.85 : 1.30,
+    0.48 / Math.max(camera.zoom, 0.08),
+  );
   ctx.lineCap = 'butt';
   ctx.lineJoin = 'miter';
   ctx.stroke();
@@ -170,9 +176,9 @@ function render() {
   const chunks = generator.query(worldBounds());
 
   const detailLevel =
-    camera.zoom < 0.20 ? 0 :
-    camera.zoom < 0.38 ? 1 :
-    camera.zoom < 0.76 ? 2 : 3;
+    camera.zoom < 0.095 ? 0 :
+    camera.zoom < 0.30 ? 1 :
+    camera.zoom < 0.68 ? 2 : 3;
 
   // One architectural fabric: compound floor union, exterior contour,
   // meaningful interior space boundaries, then sparse room details.

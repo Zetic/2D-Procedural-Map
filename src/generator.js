@@ -554,11 +554,12 @@ function macroPrimitives(seed, mx, my) {
         true,
       ),
     );
+  } else {
+    // The root only seeds the first fronts. Other macro coordinates never
+    // create visible "source complexes"; their architecture is produced by
+    // the same continuous edge/front accretion as the rest of the world.
+    out.push(...localBurst(seed, mx, my));
   }
-
-  // Every macro source contributes ordinary accretion; the root is not a
-  // special hub and therefore receives exactly the same local treatment.
-  out.push(...localBurst(seed, mx, my));
 
   for (const [nx, ny] of optionalLinks(seed, mx, my)) {
     out.push(
